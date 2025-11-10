@@ -1,0 +1,14 @@
+# compiled output
+/dist
+node_modules/
+package-lock.json
+
+# Logs
+logs
+*.log
+
+# Database
+src/database/*.sqlite
+
+# Environment
+.env
