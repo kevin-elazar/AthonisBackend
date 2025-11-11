@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order } from '../../shared/entities/order.entity';
@@ -7,6 +7,7 @@ import { Driver } from '../../shared/entities/driver.entity';
 import { Vehicle } from '../../shared/entities/vehicle.entity';
 import { OptimizationResultDto, OptimizedRoute, RouteStop } from '../dto/optimization-result.dto';
 import { GeocodingService } from './geocoding.service';
+import { OptimizedRoutesHistoryService } from './optimized-routes-history.service';
 import { GoogleMapsRouteOptimization } from '../server';
 
 @Injectable()
@@ -25,6 +26,8 @@ export class OptimizationRoutesService {
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
     private geocodingService: GeocodingService,
+    @Inject(forwardRef(() => OptimizedRoutesHistoryService))
+    private historyService: OptimizedRoutesHistoryService,
   ) {
     // Inicializar cliente do Google Maps se as credenciais estiverem disponíveis
     const projectId = process.env.GOOGLE_PROJECT_ID;
@@ -66,6 +69,9 @@ export class OptimizationRoutesService {
   }
 
   async optimizeRoutes(orderIds: number[]): Promise<OptimizationResultDto> {
+    const startTime = Date.now();
+    let googleApiResponse: any = null;
+    
     try {
       this.logger.log(`Iniciando otimização para ${orderIds.length} pedidos`);
 
@@ -99,21 +105,63 @@ export class OptimizationRoutesService {
       // Agrupar pedidos por veículo/motorista
       const groupedOrders = this.groupOrdersByVehicleAndDriver(orders);
       
-      // Simular otimização (por enquanto, sem Google API)
-      const routes = await this.createOptimizedRoutes(groupedOrders);
+      // Criar rotas otimizadas e capturar resposta da API
+      const { routes, apiResponse } = await this.createOptimizedRoutesWithApiResponse(groupedOrders);
+      googleApiResponse = apiResponse;
 
-      return {
+      const optimizationTime = Date.now() - startTime;
+
+      const result: OptimizationResultDto = {
         success: true,
         message: 'Rotas otimizadas com sucesso',
         totalRoutes: routes.length,
         totalOrders: validation.validOrders.length,
-        optimizationTime: 0, // será preenchido no controller
+        optimizationTime,
         routes,
         unassignedOrders: validation.invalidOrders
       };
 
+      // Salvar histórico no banco de dados
+      try {
+        await this.historyService.create({
+          order_ids: validation.validOrders,
+          total_routes: routes.length,
+          total_orders: validation.validOrders.length,
+          optimization_time_ms: optimizationTime,
+          google_api_response: JSON.stringify(googleApiResponse || {}),
+          optimization_result: JSON.stringify(result),
+          status: 'success',
+          notes: `Otimização realizada com ${routes.length} rota(s) criada(s)`,
+        });
+        this.logger.log('Histórico de otimização salvo com sucesso');
+      } catch (historyError) {
+        // Não falhar a otimização se houver erro ao salvar histórico
+        this.logger.error('Erro ao salvar histórico de otimização:', historyError);
+      }
+
+      return result;
+
     } catch (error) {
       this.logger.error('Erro na otimização de rotas:', error);
+      
+      // Tentar salvar histórico de erro
+      try {
+        await this.historyService.create({
+          order_ids: orderIds,
+          total_routes: 0,
+          total_orders: orderIds.length,
+          optimization_time_ms: Date.now() - startTime,
+          google_api_response: JSON.stringify(googleApiResponse || {}),
+          optimization_result: JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : 'Erro desconhecido'
+          }),
+          status: 'failed',
+          notes: `Falha na otimização: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+        });
+      } catch (historyError) {
+        this.logger.error('Erro ao salvar histórico de falha:', historyError);
+      }
       
       if (error instanceof HttpException) {
         throw error;
@@ -180,6 +228,28 @@ export class OptimizationRoutesService {
     return routes;
   }
 
+  private async createOptimizedRoutesWithApiResponse(
+    groupedOrders: Map<string, any[]>
+  ): Promise<{ routes: OptimizedRoute[]; apiResponse: any[] }> {
+    const routes: OptimizedRoute[] = [];
+    const apiResponses: any[] = [];
+    
+    for (const [key, orders] of groupedOrders) {
+      try {
+        const { route, apiResponse } = await this.createRouteForGroupWithApiResponse(orders);
+        routes.push(route);
+        if (apiResponse) {
+          apiResponses.push(apiResponse);
+        }
+      } catch (error) {
+        this.logger.error(`Erro ao criar rota para grupo ${key}:`, error);
+        // Continuar com outros grupos mesmo se um falhar
+      }
+    }
+    
+    return { routes, apiResponse: apiResponses };
+  }
+
   private async createRouteForGroup(orders: any[]): Promise<OptimizedRoute> {
     const firstOrder = orders[0];
     
@@ -210,6 +280,42 @@ export class OptimizationRoutesService {
     
     // Fallback para rota simulada
     return this.createSimulatedRoute(orders, coordinates);
+  }
+
+  private async createRouteForGroupWithApiResponse(
+    orders: any[]
+  ): Promise<{ route: OptimizedRoute; apiResponse: any | null }> {
+    const firstOrder = orders[0];
+    
+    // Obter coordenadas reais dos endereços
+    const addresses = orders.map(order => this.formatAddress(order));
+    let coordinates: any[] = [];
+    
+    try {
+      // Tentar usar geocoding real
+      const geocodingResults = await this.geocodingService.geocodeMultipleAddresses(addresses);
+      coordinates = geocodingResults;
+    } catch (error) {
+      this.logger.warn('Falha no geocoding, usando coordenadas simuladas:', error instanceof Error ? error.message : String(error));
+      // Fallback para coordenadas simuladas
+      coordinates = orders.map(order => 
+        this.geocodingService.getSimulatedCoordinates(order.delivery_city, this.formatAddress(order))
+      );
+    }
+    
+    // Se temos cliente do Google Maps, usar API real
+    if (this.googleMapsClient) {
+      try {
+        const { route, apiResponse } = await this.createRouteWithGoogleMapsAndResponse(orders, coordinates);
+        return { route, apiResponse };
+      } catch (error) {
+        this.logger.warn('Falha na API do Google Maps, usando simulação:', error instanceof Error ? error.message : String(error));
+      }
+    }
+    
+    // Fallback para rota simulada
+    const route = this.createSimulatedRoute(orders, coordinates);
+    return { route, apiResponse: null };
   }
 
   private async createRouteWithGoogleMaps(orders: any[], coordinates: any[]): Promise<OptimizedRoute> {
@@ -262,6 +368,63 @@ export class OptimizationRoutesService {
     
     // Processar resposta e criar rota otimizada
     return this.processGoogleMapsResponse(response, orders, coordinates);
+  }
+
+  private async createRouteWithGoogleMapsAndResponse(
+    orders: any[], 
+    coordinates: any[]
+  ): Promise<{ route: OptimizedRoute; apiResponse: any }> {
+    const firstOrder = orders[0];
+    
+    // Preparar modelo para Google Maps API
+    const model = {
+      vehicles: [{
+        startLocation: {
+          latitude: -23.5505, // Depósito/Base
+          longitude: -46.6333
+        },
+        endLocation: {
+          latitude: -23.5505,
+          longitude: -46.6333
+        },
+        costPerKilometer: 1.0,
+        costPerHour: 50.0,
+        loadLimits: {
+          weight: {
+            maxLoad: 1000 // kg
+          }
+        }
+      }],
+      shipments: coordinates.map((coord, index) => ({
+        pickups: [{
+          arrivalLocation: {
+            latitude: -23.5505, // Depósito
+            longitude: -46.6333
+          },
+          duration: { seconds: 0 }
+        }],
+        deliveries: [{
+          arrivalLocation: {
+            latitude: coord.latitude,
+            longitude: coord.longitude
+          },
+          duration: { seconds: 1800 } // 30 minutos
+        }],
+        loadDemands: {
+          weight: {
+            amount: orders[index].quantity || 1
+          }
+        }
+      }))
+    };
+
+    // Chamar API do Google Maps
+    const response = await this.googleMapsClient.optimizeTours(model);
+    
+    // Processar resposta e criar rota otimizada
+    const route = this.processGoogleMapsResponse(response, orders, coordinates);
+    
+    return { route, apiResponse: response };
   }
 
   private processGoogleMapsResponse(response: any, orders: any[], coordinates: any[]): OptimizedRoute {
