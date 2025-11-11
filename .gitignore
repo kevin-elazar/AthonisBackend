@@ -12,3 +12,6 @@ src/database/*.sqlite
 
 # Environment
 .env
+
+# Client secret
+client_secret.json

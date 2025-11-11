@@ -1,3 +1,4 @@
+import { config as dotenvConfig } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { AppModule } from './app.module';
@@ -5,6 +6,9 @@ import { loggingConfig } from './config/logging.config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { HttpErrorInterceptor } from './shared/interceptors/http-error.interceptor';
 import { HttpExceptionFilter } from './filters/http-exception.filter';
+
+// Carregar variáveis de ambiente do arquivo .env
+dotenvConfig();
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {

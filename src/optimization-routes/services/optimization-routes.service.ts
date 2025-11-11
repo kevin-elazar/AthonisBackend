@@ -229,7 +229,9 @@ export class OptimizationRoutesService {
         costPerKilometer: 1.0,
         costPerHour: 50.0,
         loadLimits: {
-          maxLoad: 1000 // kg
+          weight: {
+            maxLoad: 1000 // kg
+          }
         }
       }],
       shipments: coordinates.map((coord, index) => ({
@@ -238,18 +240,20 @@ export class OptimizationRoutesService {
             latitude: -23.5505, // Depósito
             longitude: -46.6333
           },
-          duration: '0s'
+          duration: { seconds: 0 }
         }],
         deliveries: [{
           arrivalLocation: {
             latitude: coord.latitude,
             longitude: coord.longitude
           },
-          duration: '1800s' // 30 minutos
+          duration: { seconds: 1800 } // 30 minutos
         }],
-        loadDemands: [{
-          amount: orders[index].quantity || 1
-        }]
+        loadDemands: {
+          weight: {
+            amount: orders[index].quantity || 1
+          }
+        }
       }))
     };
 
@@ -262,15 +266,31 @@ export class OptimizationRoutesService {
 
   private processGoogleMapsResponse(response: any, orders: any[], coordinates: any[]): OptimizedRoute {
     const firstOrder = orders[0];
-    const route = response.routes?.[0];
     
-    if (!route) {
+    // A resposta é um array, o primeiro elemento contém os dados
+    const optimizationResult = response[0];
+    
+    if (!optimizationResult || !optimizationResult.routes || optimizationResult.routes.length === 0) {
       throw new Error('Nenhuma rota retornada pela API do Google Maps');
     }
 
-    const stops: RouteStop[] = route.visits?.map((visit: any, index: number) => {
-      const order = orders[index];
-      const coord = coordinates[index];
+    const route = optimizationResult.routes[0];
+    
+    // Filtrar apenas as visitas de entrega (deliveries), ignorar pickups
+    const deliveryVisits = route.visits?.filter((visit: any) => !visit.isPickup) || [];
+
+    const stops: RouteStop[] = deliveryVisits.map((visit: any, index: number) => {
+      const shipmentIndex = visit.shipmentIndex;
+      const order = orders[shipmentIndex];
+      const coord = coordinates[shipmentIndex];
+      
+      // Converter startTime de seconds para ISO string
+      let estimatedArrivalTime = this.calculateEstimatedTime(index);
+      if (visit.startTime && visit.startTime.seconds) {
+        const startDate = new Date();
+        startDate.setSeconds(startDate.getSeconds() + parseInt(visit.startTime.seconds));
+        estimatedArrivalTime = startDate.toISOString();
+      }
       
       return {
         orderId: order.order_id,
@@ -280,18 +300,24 @@ export class OptimizationRoutesService {
           latitude: coord.latitude,
           longitude: coord.longitude
         },
-        estimatedArrivalTime: visit.startTime || this.calculateEstimatedTime(index),
-        estimatedDuration: visit.duration ? parseInt(visit.duration.replace('s', '')) / 60 : 30
+        estimatedArrivalTime: estimatedArrivalTime,
+        estimatedDuration: 30 // 30 minutos padrão por parada
       };
-    }) || [];
+    });
+
+    // Converter métricas da resposta
+    const totalDistanceMeters = route.metrics?.travelDistanceMeters || 0;
+    const totalDurationSeconds = route.metrics?.totalDuration?.seconds 
+      ? parseInt(route.metrics.totalDuration.seconds) 
+      : 0;
 
     return {
       vehicleId: firstOrder.vehicle_id,
       vehicleName: firstOrder.vehicle?.name || 'Veículo não encontrado',
       driverId: firstOrder.driver_id,
       driverName: firstOrder.driver?.name || 'Motorista não encontrado',
-      totalDistance: route.metrics?.totalDistance || stops.length * 5000,
-      totalDuration: route.metrics?.totalDuration ? parseInt(route.metrics.totalDuration.replace('s', '')) / 60 : stops.length * 30,
+      totalDistance: totalDistanceMeters, // em metros
+      totalDuration: Math.round(totalDurationSeconds / 60), // converter segundos para minutos
       stops,
       startLocation: {
         latitude: -23.5505,

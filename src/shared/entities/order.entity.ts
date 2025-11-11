@@ -1,11 +1,25 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  RelationId,
+} from 'typeorm';
+import { Client } from './client.entity';
+import { Driver } from './driver.entity';
+import { Vehicle } from './vehicle.entity';
 
 @Entity('order')
 export class Order {
   @PrimaryGeneratedColumn()
   order_id: number;
 
-  @Column({ type: 'int' })
+  @ManyToOne(() => Client, { nullable: false })
+  @JoinColumn({ name: 'client_id', referencedColumnName: 'client_id' })
+  client: Client;
+
+  @RelationId((order: Order) => order.client)
   client_id: number;
 
   @Column({ type: 'varchar', length: 100 })
@@ -20,10 +34,18 @@ export class Order {
   @Column({ type: 'varchar', length: 20 })
   urgency: string;
 
-  @Column({ type: 'int', nullable: true })
+  @ManyToOne(() => Vehicle, { nullable: true })
+  @JoinColumn({ name: 'vehicle_id', referencedColumnName: 'vehicle_id' })
+  vehicle?: Vehicle;
+
+  @RelationId((order: Order) => order.vehicle)
   vehicle_id?: number;
 
-  @Column({ type: 'int', nullable: true })
+  @ManyToOne(() => Driver, { nullable: true })
+  @JoinColumn({ name: 'driver_id', referencedColumnName: 'driver_id' })
+  driver?: Driver;
+
+  @RelationId((order: Order) => order.driver)
   driver_id?: number;
 
   //@Column({ type: 'date', nullable: true })
