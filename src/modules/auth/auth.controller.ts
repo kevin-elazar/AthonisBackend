@@ -1,0 +1,77 @@
+import { 
+  Controller, 
+  Post, 
+  Body, 
+  Get, 
+  UseGuards,
+  Request,
+  HttpCode,
+  HttpStatus
+} from '@nestjs/common';
+import { 
+  ApiTags, 
+  ApiOperation, 
+  ApiResponse, 
+  ApiBearerAuth 
+} from '@nestjs/swagger';
+import { AuthService } from './auth.service';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+import { AuthResponseDto } from './dto/auth-response.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/roles.decorator';
+
+@ApiTags('Autenticação')
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('register')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Registrar novo usuário (Apenas Admin)',
+    description: 'Apenas usuários com role "admin" podem registrar novos usuários no sistema.'
+  })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Usuário registrado com sucesso',
+    type: AuthResponseDto 
+  })
+  @ApiResponse({ status: 401, description: 'Não autorizado - Token inválido ou ausente' })
+  @ApiResponse({ status: 403, description: 'Proibido - Apenas administradores podem registrar usuários' })
+  @ApiResponse({ status: 409, description: 'Email já cadastrado' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  async register(@Body() registerDto: RegisterDto): Promise<AuthResponseDto> {
+    return this.authService.register(registerDto);
+  }
+
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Fazer login' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Login realizado com sucesso',
+    type: AuthResponseDto 
+  })
+  @ApiResponse({ status: 401, description: 'Credenciais inválidas' })
+  async login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
+    return this.authService.login(loginDto);
+  }
+
+  @Get('profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Obter perfil do usuário autenticado' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Perfil do usuário retornado com sucesso' 
+  })
+  @ApiResponse({ status: 401, description: 'Não autorizado' })
+  async getProfile(@Request() req) {
+    return this.authService.getProfile(req.user.id);
+  }
+}
+

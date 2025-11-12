@@ -15,9 +15,14 @@ export class OrdersService {
 
   async create(createOrderDto: CreateOrderDto) {
     try {
-      const order = this.orderRepository.create(createOrderDto);
-      console.log('Creating order with data:', JSON.stringify(createOrderDto, null, 2));
-      
+      // Normalizar IDs: converter 0 para undefined (NULL no banco)
+      const normalizedDto = {
+        ...createOrderDto,
+        vehicle_id: createOrderDto.vehicle_id === 0 ? undefined : createOrderDto.vehicle_id,
+        driver_id: createOrderDto.driver_id === 0 ? undefined : createOrderDto.driver_id,
+      };
+
+      const order = this.orderRepository.create(normalizedDto);
       return await this.orderRepository.save(order);
     } catch (error) {
       console.error('Error creating order:', {
@@ -26,22 +31,19 @@ export class OrdersService {
         data: createOrderDto
       });
 
-      if (
-        typeof error === 'object' && 
-        error !== null && 
-        'driverError' in error && 
-        error.driverError && 
-        typeof error.driverError === 'object' &&
-        'detail' in error.driverError
-      ) {
-        throw new BadRequestException(error.driverError.detail);
-      }
-
       if (error instanceof Error) {
+        // Mensagens mais amigáveis para erros comuns
+        if (error.message.includes('FOREIGN KEY constraint failed')) {
+          throw new BadRequestException({
+            message: 'IDs inválidos fornecidos',
+            error: 'Um ou mais IDs (client_id, vehicle_id ou driver_id) não existem no banco de dados',
+            hint: 'Verifique se os IDs fornecidos existem e estão corretos'
+          });
+        }
+
         throw new BadRequestException({
-          message: 'Error creating order',
+          message: 'Erro ao criar pedido',
           error: error.message,
-          details: JSON.stringify(createOrderDto)
         });
       }
 

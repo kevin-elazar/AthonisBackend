@@ -1,12 +1,15 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { DriversService } from '../services/drivers.service';
 import { CreateDriverDto } from '../dto/create-driver.dto';
 import { UpdateDriverDto } from '../dto/update-driver.dto';
 import { FindDriverDto } from '../dto/find-driver.dto';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @ApiTags('Motoristas')
 @Controller('drivers')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
 export class DriversController {
   constructor(private readonly driversService: DriversService) {}
 

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, BadRequestException, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, BadRequestException, Logger, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { plainToClass } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -6,9 +6,12 @@ import { ClientsService } from '../services/clients.service';
 import { CreateClientDto } from '../dto/create-client.dto';
 import { UpdateClientDto } from '../dto/update-client.dto';
 import { FindClientDto } from '../dto/find-client.dto';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @ApiTags('Clientes')
 @Controller('clients')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
 export class ClientsController {
   private readonly logger = new Logger(ClientsController.name);
 

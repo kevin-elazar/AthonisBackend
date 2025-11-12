@@ -15,12 +15,12 @@ export class Order {
   @PrimaryGeneratedColumn()
   order_id: number;
 
+  @Column({ type: 'int' })
+  client_id: number;
+
   @ManyToOne(() => Client, { nullable: false })
   @JoinColumn({ name: 'client_id', referencedColumnName: 'client_id' })
   client: Client;
-
-  @RelationId((order: Order) => order.client)
-  client_id: number;
 
   @Column({ type: 'varchar', length: 100 })
   title: string;
@@ -34,19 +34,19 @@ export class Order {
   @Column({ type: 'varchar', length: 20 })
   urgency: string;
 
+  @Column({ type: 'int', nullable: true })
+  vehicle_id?: number;
+
   @ManyToOne(() => Vehicle, { nullable: true })
   @JoinColumn({ name: 'vehicle_id', referencedColumnName: 'vehicle_id' })
   vehicle?: Vehicle;
 
-  @RelationId((order: Order) => order.vehicle)
-  vehicle_id?: number;
+  @Column({ type: 'int', nullable: true })
+  driver_id?: number;
 
   @ManyToOne(() => Driver, { nullable: true })
   @JoinColumn({ name: 'driver_id', referencedColumnName: 'driver_id' })
   driver?: Driver;
-
-  @RelationId((order: Order) => order.driver)
-  driver_id?: number;
 
   //@Column({ type: 'date', nullable: true })
   //delivery_date?: Date;

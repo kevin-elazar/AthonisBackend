@@ -8,7 +8,7 @@ logs
 *.log
 
 # Database
-src/database/*.sqlite
+#src/database/*.sqlite
 
 # Environment
 .env

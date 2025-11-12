@@ -1,11 +1,14 @@
-import { Controller, Post, Body, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { Controller, Post, Body, Logger, HttpException, HttpStatus, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { OptimizationRoutesService } from '../services/optimization-routes.service';
 import { OptimizeRoutesDto } from '../dto/optimize-routes.dto';
 import { OptimizationResultDto } from '../dto/optimization-result.dto';
+import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard';
 
 @ApiTags('Otimização de Rotas')
 @Controller('optimization-routes')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
 export class OptimizationRoutesController {
   private readonly logger = new Logger(OptimizationRoutesController.name);
 

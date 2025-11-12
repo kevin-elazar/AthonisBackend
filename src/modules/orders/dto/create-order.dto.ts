@@ -31,12 +31,20 @@ export class CreateOrderDto {
   @MaxLength(20)
   urgency: string;
 
-  @ApiProperty({ description: 'ID do veículo (opcional)', required: false })
+  @ApiProperty({ 
+    description: 'ID do veículo (opcional - omita ou envie null se não tiver)', 
+    required: false,
+    example: 1
+  })
   @IsOptional()
   @IsNumber()
   vehicle_id?: number;
 
-  @ApiProperty({ description: 'ID do motorista (opcional)', required: false })
+  @ApiProperty({ 
+    description: 'ID do motorista (opcional - omita ou envie null se não tiver)', 
+    required: false,
+    example: 1
+  })
   @IsOptional()
   @IsNumber()
   driver_id?: number;

@@ -21,8 +21,19 @@ async function bootstrap() {
   // Configuração do Swagger
   const config = new DocumentBuilder()
     .setTitle('Logistics API')
-    .setDescription('API para sistema de logística')
+    .setDescription('API para sistema de logística e otimização de rotas')
     .setVersion('1.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'JWT',
+        description: 'Insira o token JWT',
+        in: 'header',
+      },
+      'JWT-auth', // Este nome será usado no @ApiBearerAuth()
+    )
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);

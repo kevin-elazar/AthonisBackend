@@ -1,12 +1,15 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { VehiclesService } from '../services/vehicles.service';
 import { CreateVehicleDto } from '../dto/create-vehicle.dto';
 import { UpdateVehicleDto } from '../dto/update-vehicle.dto';
 import { FindVehicleDto } from '../dto/find-vehicle.dto';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @ApiTags('Veículos')
 @Controller('vehicles')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
 
