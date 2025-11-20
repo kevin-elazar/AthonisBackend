@@ -66,7 +66,7 @@ export class CreateClientDto {
   @IsOptional()
   complement?: string;
 
-  @ApiProperty({ description: 'Observações (opcional)', required: false })
+  @ApiProperty({ description: 'Observações/Anotações (opcional)', required: false })
   @IsOptional()
-  observations?: string;
+  notes?: string;
 }
