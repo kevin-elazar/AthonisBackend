@@ -1,0 +1,11 @@
+client_id,title,description,invoice_number,urgency,vehicle_id,driver_id,quantity,delivery_street,delivery_district,delivery_city,delivery_state,delivery_zipcode,delivery_number,delivery_complement
+1,Entrega de Mercadorias Centro,Entrega de produtos alimentícios perecíveis,NF-2024001,alta,1,1,25,Rua das Flores,Centro,São Paulo,SP,01234-567,123,Apt 101
+1,Coleta de Documentos,Retirada de documentos importantes,NF-2024002,normal,1,1,1,Av Paulista,Bela Vista,São Paulo,SP,01310-100,1000,Sala 205
+1,Transporte de Equipamentos,Equipamentos eletrônicos frágeis,NF-2024003,alta,2,2,15,Rua XV de Novembro,Centro,Curitiba,PR,80020-310,500,Galpão B
+1,Entrega Residencial,Entrega de móveis,NF-2024004,baixa,2,2,3,Rua das Acácias,Jardim Botânico,Rio de Janeiro,RJ,22461-000,88,Casa 2
+1,Entrega Expressa Matutina,Documentos urgentes para assinatura,,normal,1,1,1,Av Brigadeiro Faria Lima,Pinheiros,São Paulo,SP,01452-000,3000,10º andar
+1,Distribuição Farmacêutica,Medicamentos controlados,NF-2024005,alta,1,1,50,Rua dos Pinheiros,Pinheiros,São Paulo,SP,05422-001,1234,
+1,Carga Seca Industrial,,NF-2024006,baixa,2,2,100,Av Industrial,Distrito Industrial,Campinas,SP,13035-680,2500,Portão 3
+1,Entrega Comercial,Material de escritório,NF-2024007,normal,,,20,Rua do Comércio,Centro,Belo Horizonte,MG,30110-060,750,Loja 15
+1,Transporte de Alimentos,Produtos congelados,NF-2024008,alta,1,1,40,Rua Sete de Setembro,Centro Histórico,Porto Alegre,RS,90010-191,999,Fundos
+1,Entrega VIP,Cliente especial - tratamento diferenciado,NF-2024009,alta,1,1,5,Av Atlântica,Copacabana,Rio de Janeiro,RJ,22021-001,1702,Cobertura

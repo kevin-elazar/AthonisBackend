@@ -2,10 +2,10 @@ import { config as dotenvConfig } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { loggingConfig } from './config/logging.config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { HttpErrorInterceptor } from './shared/interceptors/http-error.interceptor';
 import { HttpExceptionFilter } from './filters/http-exception.filter';
+import { config as envConfig } from './config/env.config';
 
 // Carregar variáveis de ambiente do arquivo .env
 dotenvConfig();
@@ -59,6 +59,6 @@ async function bootstrap() {
   );
   app.enableCors();
 
-  await app.listen(3000);
+  await app.listen(envConfig.port);
 }
 bootstrap();
