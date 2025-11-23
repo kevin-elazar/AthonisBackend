@@ -22,6 +22,8 @@ import { Driver } from '../../../shared/entities/driver.entity';
 import { OrdersService } from '../../orders/services/orders.service';
 import { CreateOrderDto } from '../../orders/dto/create-order.dto';
 import { ImportResultDto, OrderSuccessDto, OrderFailureDto } from '../dto/import-result.dto';
+import { RejectedFileListDto, RejectedFileDto } from '../dto/rejected-file-list.dto';
+import { FindRejectedFilesDto } from '../dto/find-rejected-files.dto';
 
 @Injectable()
 export class OrderImportsService {
@@ -64,6 +66,26 @@ export class OrderImportsService {
   }
 
   /**
+   * Detecta o delimitador do CSV (vírgula ou ponto e vírgula)
+   */
+  private async detectDelimiter(filePath: string): Promise<string> {
+    try {
+      const fileContent = await fs.readFile(filePath, 'utf-8');
+      const firstLine = fileContent.split('\n')[0];
+      
+      // Contar ocorrências de vírgula e ponto e vírgula na primeira linha
+      const commaCount = (firstLine.match(/,/g) || []).length;
+      const semicolonCount = (firstLine.match(/;/g) || []).length;
+      
+      // Se houver mais ponto e vírgula, usar ponto e vírgula, senão usar vírgula
+      return semicolonCount > commaCount ? ';' : ',';
+    } catch (error) {
+      this.logger.warn('Não foi possível detectar o delimitador, usando vírgula como padrão');
+      return ',';
+    }
+  }
+
+  /**
    * Valida se o arquivo CSV possui formato e cabeçalho corretos
    */
   async validateFileFormat(filePath: string): Promise<boolean> {
@@ -81,14 +103,19 @@ export class OrderImportsService {
         'delivery_number'
       ];
 
+      // Detectar o delimitador
+      const delimiter = await this.detectDelimiter(filePath);
+
       return new Promise((resolve, reject) => {
         let headerChecked = false;
 
         createReadStream(filePath)
-          .pipe(csvParser())
+          .pipe(csvParser({ separator: delimiter }))
           .on('headers', (headers: string[]) => {
             headerChecked = true;
-            const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+            // Normalizar headers removendo espaços em branco
+            const normalizedHeaders = headers.map(h => h.trim());
+            const missingColumns = requiredColumns.filter(col => !normalizedHeaders.includes(col));
             
             if (missingColumns.length > 0) {
               reject(new BadRequestException(
@@ -165,98 +192,111 @@ export class OrderImportsService {
 
   /**
    * Processa o CSV e separa linhas válidas e inválidas
+   * Processa TODAS as linhas antes de retornar, mesmo que algumas tenham erros
    */
   async processCSV(filePath: string): Promise<{ valid: any[]; invalid: any[] }> {
     const valid: any[] = [];
     const invalid: any[] = [];
     let lineNumber = 1; // Linha 1 é o cabeçalho
 
+    // Detectar o delimitador
+    const delimiter = await this.detectDelimiter(filePath);
+
     return new Promise((resolve, reject) => {
+      const rows: any[] = [];
+      let processing = false;
+      let ended = false;
+
       const stream = createReadStream(filePath)
-        .pipe(csvParser())
-        .on('data', async (row) => {
-          // Pausar o stream para aguardar operações assíncronas
-          stream.pause();
+        .pipe(csvParser({ separator: delimiter }))
+        .on('data', (row) => {
+          // Coletar todas as linhas primeiro
+          rows.push(row);
+        })
+        .on('end', async () => {
+          ended = true;
+          this.logger.log(`Lidas ${rows.length} linhas do CSV. Iniciando processamento...`);
           
-          lineNumber++;
-          
-          try {
-            // Converter e normalizar dados
-            const orderData: any = {
-              client_id: row.client_id ? Number(row.client_id) : undefined,
-              title: row.title?.trim() || undefined,
-              description: row.description?.trim() || undefined,
-              invoice_number: row.invoice_number?.trim() || undefined,
-              urgency: row.urgency?.trim() || undefined,
-              vehicle_id: row.vehicle_id ? Number(row.vehicle_id) : undefined,
-              driver_id: row.driver_id ? Number(row.driver_id) : undefined,
-              quantity: row.quantity ? Number(row.quantity) : undefined,
-              delivery_street: row.delivery_street?.trim() || undefined,
-              delivery_district: row.delivery_district?.trim() || undefined,
-              delivery_city: row.delivery_city?.trim() || undefined,
-              delivery_state: row.delivery_state?.trim() || undefined,
-              delivery_zipcode: row.delivery_zipcode?.trim() || undefined,
-              delivery_number: row.delivery_number?.trim() || undefined,
-              delivery_complement: row.delivery_complement?.trim() || undefined,
-            };
+          // Processar todas as linhas sequencialmente
+          for (const row of rows) {
+            lineNumber++;
+            
+            try {
+              // Converter e normalizar dados
+              const orderData: any = {
+                client_id: row.client_id ? Number(row.client_id) : undefined,
+                title: row.title?.trim() || undefined,
+                description: row.description?.trim() || undefined,
+                invoice_number: row.invoice_number?.trim() || undefined,
+                urgency: row.urgency?.trim() || undefined,
+                vehicle_id: row.vehicle_id ? Number(row.vehicle_id) : undefined,
+                driver_id: row.driver_id ? Number(row.driver_id) : undefined,
+                quantity: row.quantity ? Number(row.quantity) : undefined,
+                delivery_street: row.delivery_street?.trim() || undefined,
+                delivery_district: row.delivery_district?.trim() || undefined,
+                delivery_city: row.delivery_city?.trim() || undefined,
+                delivery_state: row.delivery_state?.trim() || undefined,
+                delivery_zipcode: row.delivery_zipcode?.trim() || undefined,
+                delivery_number: row.delivery_number?.trim() || undefined,
+                delivery_complement: row.delivery_complement?.trim() || undefined,
+              };
 
-            // Remover campos undefined ou vazios para campos opcionais
-            Object.keys(orderData).forEach(key => {
-              if (orderData[key] === undefined || orderData[key] === '' || 
-                  (typeof orderData[key] === 'number' && isNaN(orderData[key]))) {
-                if (['description', 'invoice_number', 'vehicle_id', 'driver_id', 'delivery_complement'].includes(key)) {
-                  delete orderData[key];
-                }
-              }
-            });
-
-            // Validar com class-validator
-            const dto = plainToClass(CreateOrderDto, orderData);
-            const validationErrors = await validate(dto);
-
-            const errors: string[] = [];
-
-            if (validationErrors.length > 0) {
-              validationErrors.forEach(error => {
-                if (error.constraints) {
-                  Object.values(error.constraints).forEach(msg => {
-                    errors.push(msg as string);
-                  });
+              // Remover campos undefined ou vazios para campos opcionais
+              Object.keys(orderData).forEach(key => {
+                if (orderData[key] === undefined || orderData[key] === '' || 
+                    (typeof orderData[key] === 'number' && isNaN(orderData[key]))) {
+                  if (['description', 'invoice_number', 'vehicle_id', 'driver_id', 'delivery_complement'].includes(key)) {
+                    delete orderData[key];
+                  }
                 }
               });
-            }
 
-            // Validar referências (FKs)
-            const refValidation = await this.validateReferences(orderData);
-            if (!refValidation.isValid) {
-              errors.push(...refValidation.errors);
-            }
+              // Validar com class-validator
+              const dto = plainToClass(CreateOrderDto, orderData);
+              const validationErrors = await validate(dto);
 
-            if (errors.length > 0) {
+              const errors: string[] = [];
+
+              if (validationErrors.length > 0) {
+                validationErrors.forEach(error => {
+                  if (error.constraints) {
+                    Object.values(error.constraints).forEach(msg => {
+                      errors.push(msg as string);
+                    });
+                  }
+                });
+              }
+
+              // Validar referências (FKs) - sempre executa, mesmo se já houver erros de validação
+              const refValidation = await this.validateReferences(orderData);
+              if (!refValidation.isValid) {
+                errors.push(...refValidation.errors);
+              }
+
+              if (errors.length > 0) {
+                invalid.push({
+                  linha: lineNumber,
+                  dados: orderData,
+                  erros: errors
+                });
+                this.logger.warn(`Linha ${lineNumber} rejeitada: ${errors.join('; ')}`);
+              } else {
+                valid.push({
+                  linha: lineNumber,
+                  dados: dto
+                });
+                this.logger.debug(`Linha ${lineNumber} validada com sucesso`);
+              }
+            } catch (error) {
+              this.logger.warn(`Erro ao processar linha ${lineNumber}: ${error}`);
               invalid.push({
                 linha: lineNumber,
-                dados: orderData,
-                erros: errors
-              });
-            } else {
-              valid.push({
-                linha: lineNumber,
-                dados: dto
+                dados: row,
+                erros: [`Erro ao processar dados da linha: ${error instanceof Error ? error.message : 'Erro desconhecido'}`]
               });
             }
-          } catch (error) {
-            this.logger.warn(`Erro ao processar linha ${lineNumber}: ${error}`);
-            invalid.push({
-              linha: lineNumber,
-              dados: row,
-              erros: ['Erro ao processar dados da linha']
-            });
           }
-          
-          // Retomar o stream após processar a linha
-          stream.resume();
-        })
-        .on('end', () => {
+
           this.logger.log(`Processamento CSV concluído. Válidos: ${valid.length}, Inválidos: ${invalid.length}`);
           resolve({ valid, invalid });
         })
@@ -451,6 +491,113 @@ export class OrderImportsService {
         throw error;
       }
       throw new InternalServerErrorException('Erro ao buscar arquivo de rejeição');
+    }
+  }
+
+  /**
+   * Formata o tamanho do arquivo em formato legível
+   */
+  private formatFileSize(bytes: number): string {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  }
+
+  /**
+   * Lista todos os arquivos de rejeição com filtro opcional por data
+   */
+  async listRejectedFiles(filters?: FindRejectedFilesDto): Promise<RejectedFileListDto> {
+    try {
+      // Verificar se o diretório existe
+      try {
+        await fs.access(this.rejectedDir);
+      } catch {
+        // Se o diretório não existir, retornar lista vazia
+        return {
+          files: [],
+          total: 0
+        };
+      }
+
+      // Ler todos os arquivos do diretório
+      const files = await fs.readdir(this.rejectedDir);
+      
+      // Filtrar apenas arquivos CSV de rejeição (que começam com REJEICAO_)
+      const rejectedFiles = files.filter(file => 
+        file.startsWith('REJEICAO_') && file.toLowerCase().endsWith('.csv')
+      );
+
+      // Obter informações de cada arquivo
+      let fileInfos: RejectedFileDto[] = await Promise.all(
+        rejectedFiles.map(async (filename) => {
+          const filePath = path.join(this.rejectedDir, filename);
+          const stats = await fs.stat(filePath);
+
+          return {
+            filename,
+            size: stats.size,
+            sizeFormatted: this.formatFileSize(stats.size),
+            createdAt: stats.birthtime,
+            modifiedAt: stats.mtime
+          };
+        })
+      );
+
+      // Aplicar filtro por data se fornecido
+      if (filters?.dataInicio || filters?.dataFim) {
+        // Criar datas no início e fim do dia no fuso horário local
+        const dataInicio = filters.dataInicio 
+          ? new Date(filters.dataInicio + 'T00:00:00')
+          : null;
+        const dataFim = filters.dataFim 
+          ? new Date(filters.dataFim + 'T23:59:59.999')
+          : null;
+
+        // Validar se dataInicio é anterior a dataFim
+        if (dataInicio && dataFim && dataInicio > dataFim) {
+          throw new BadRequestException('A data inicial deve ser anterior ou igual à data final');
+        }
+
+        fileInfos = fileInfos.filter(file => {
+          const fileDate = new Date(file.modifiedAt);
+          
+          // Comparar apenas a parte da data (ignorar hora)
+          const fileDateOnly = new Date(fileDate.getFullYear(), fileDate.getMonth(), fileDate.getDate());
+          
+          if (dataInicio) {
+            const dataInicioOnly = new Date(dataInicio.getFullYear(), dataInicio.getMonth(), dataInicio.getDate());
+            if (fileDateOnly < dataInicioOnly) {
+              return false;
+            }
+          }
+          
+          if (dataFim) {
+            const dataFimOnly = new Date(dataFim.getFullYear(), dataFim.getMonth(), dataFim.getDate());
+            if (fileDateOnly > dataFimOnly) {
+              return false;
+            }
+          }
+          
+          return true;
+        });
+      }
+
+      // Ordenar por data de modificação (mais recentes primeiro)
+      fileInfos.sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
+
+      this.logger.log(`Listados ${fileInfos.length} arquivos de rejeição${filters?.dataInicio || filters?.dataFim ? ` (filtrados por data)` : ''}`);
+
+      return {
+        files: fileInfos,
+        total: fileInfos.length
+      };
+    } catch (error) {
+      this.logger.error(`Erro ao listar arquivos de rejeição: ${error}`);
+      throw new InternalServerErrorException('Erro ao listar arquivos de rejeição');
     }
   }
 }

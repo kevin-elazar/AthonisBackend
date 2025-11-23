@@ -1,0 +1,4 @@
+client_id;title;description;invoice_number;urgency;vehicle_id;driver_id;quantity;delivery_street;delivery_district;delivery_city;delivery_state;delivery_zipcode;delivery_number;delivery_complement
+99;Entrega de Mercadorias Centro;Entrega de produtos alimentícios perecíveis;NF-2024001;alta;1;1;25;Rua das Flores;Centro;São Paulo;SP;01234-567;123;Apt 101
+1;Coleta de Documentos;Retirada de documentos importantes;NF-2024002;normal;1;1;1;Av Paulista;Bela Vista;São Paulo;SP;01310-100;1000;Sala 205
+;;;;;;;;;;;;;;

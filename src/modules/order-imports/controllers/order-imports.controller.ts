@@ -3,6 +3,7 @@ import {
   Post, 
   Get,
   Param,
+  Query,
   UseInterceptors, 
   UploadedFile, 
   UseGuards,
@@ -24,6 +25,8 @@ import {
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { OrderImportsService } from '../services/order-imports.service';
 import { ImportResultDto } from '../dto/import-result.dto';
+import { RejectedFileListDto } from '../dto/rejected-file-list.dto';
+import { FindRejectedFilesDto } from '../dto/find-rejected-files.dto';
 import { createReadStream } from 'fs';
 import type { Response as ExpressResponse } from 'express';
 
@@ -150,6 +153,62 @@ export class OrderImportsController {
 
     } catch (error) {
       this.logger.error(`Erro no upload do CSV: ${error}`);
+      throw error;
+    }
+  }
+
+  @Get('rejected-files')
+  @ApiOperation({ 
+    summary: 'Listar arquivos de rejeição',
+    description: 'Retorna uma lista de todos os arquivos de rejeição gerados durante as importações, ordenados por data de modificação (mais recentes primeiro). Permite filtrar por intervalo de datas usando os parâmetros dataInicio e dataFim.' 
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Lista de arquivos de rejeição retornada com sucesso',
+    type: RejectedFileListDto,
+    schema: {
+      example: {
+        files: [
+          {
+            filename: 'REJEICAO_teste_rejeicao_20251123_170943.csv',
+            size: 2048,
+            sizeFormatted: '2 KB',
+            createdAt: '2025-11-23T17:09:43.000Z',
+            modifiedAt: '2025-11-23T17:09:43.000Z'
+          }
+        ],
+        total: 1
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Parâmetros de data inválidos',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Data inicial deve estar no formato YYYY-MM-DD',
+        error: 'Bad Request'
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 500, 
+    description: 'Erro interno do servidor',
+    schema: {
+      example: {
+        statusCode: 500,
+        message: 'Erro ao listar arquivos de rejeição',
+        error: 'Internal Server Error'
+      }
+    }
+  })
+  async listRejectedFiles(@Query() query: FindRejectedFilesDto): Promise<RejectedFileListDto> {
+    try {
+      this.logger.log(`Solicitação de listagem de arquivos de rejeição${query.dataInicio || query.dataFim ? ` com filtros: dataInicio=${query.dataInicio}, dataFim=${query.dataFim}` : ''}`);
+      return await this.orderImportsService.listRejectedFiles(query);
+    } catch (error) {
+      this.logger.error(`Erro ao listar arquivos de rejeição: ${error}`);
       throw error;
     }
   }
