@@ -23,7 +23,13 @@ export class OrdersService {
       };
 
       const order = this.orderRepository.create(normalizedDto);
-      return await this.orderRepository.save(order);
+      const savedOrder = await this.orderRepository.save(order);
+      
+      // Recarregar com relações para retornar os nomes
+      return await this.orderRepository.findOne({
+        where: { order_id: savedOrder.order_id },
+        relations: ['client', 'driver', 'vehicle']
+      });
     } catch (error) {
       console.error('Error creating order:', {
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -71,6 +77,7 @@ export class OrdersService {
   
       const [items, total] = await this.orderRepository.findAndCount({
         where,
+        relations: ['client', 'driver', 'vehicle'],
         order: { [sort_by]: order },
         skip: (page - 1) * limit,
         take: limit,
@@ -109,7 +116,10 @@ export class OrdersService {
   }
 
   async findOne(id: string) {
-    const order = await this.orderRepository.findOne({ where: { order_id: Number(id) } });
+    const order = await this.orderRepository.findOne({ 
+      where: { order_id: Number(id) },
+      relations: ['client', 'driver', 'vehicle']
+    });
     if (!order) {
       throw new NotFoundException(`Order ID ${id} not found`);
     }
@@ -119,7 +129,13 @@ export class OrdersService {
   async update(id: string, updateOrderDto: UpdateOrderDto) {
     const order = await this.findOne(id);
     Object.assign(order, updateOrderDto);
-    return await this.orderRepository.save(order);
+    const updatedOrder = await this.orderRepository.save(order);
+    
+    // Recarregar com relações para retornar os nomes
+    return await this.orderRepository.findOne({
+      where: { order_id: updatedOrder.order_id },
+      relations: ['client', 'driver', 'vehicle']
+    });
   }
 
   async remove(id: string) {
