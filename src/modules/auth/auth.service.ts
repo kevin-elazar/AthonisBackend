@@ -40,6 +40,9 @@ export class AuthService {
 
       // Criar usuário com id_company do admin que está registrando
       const idCompany = this.tenantContext.getIdCompany();
+      const adminUser = this.tenantContext.getUser();
+      const createdBy = adminUser?.email ?? undefined;
+
       const user = this.userRepository.create({
         email: registerDto.email,
         password: hashedPassword,
@@ -47,6 +50,7 @@ export class AuthService {
         role: registerDto.role || 'user',
         id_company: idCompany,
         is_active: true,
+        created_by: createdBy,
       });
 
       const savedUser = await this.userRepository.save(user);

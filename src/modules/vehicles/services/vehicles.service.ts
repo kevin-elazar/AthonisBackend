@@ -17,7 +17,14 @@ export class VehiclesService {
 
   async create(createVehicleDto: CreateVehicleDto) {
     const idCompany = this.tenantContext.getIdCompany();
-    const vehicle = this.vehicleRepository.create({ ...createVehicleDto, id_company: idCompany });
+    const user = this.tenantContext.getUser();
+    const createdBy = user?.email ?? undefined;
+
+    const vehicle = this.vehicleRepository.create({
+      ...createVehicleDto,
+      id_company: idCompany,
+      created_by: createdBy,
+    });
     return await this.vehicleRepository.save(vehicle);
   }
 
@@ -90,7 +97,10 @@ export class VehiclesService {
 
   async update(id: string, updateVehicleDto: UpdateVehicleDto) {
     const vehicle = await this.findOne(id);
-    Object.assign(vehicle, updateVehicleDto);
+    const user = this.tenantContext.getUser();
+    const updatedBy = user?.email ?? undefined;
+
+    Object.assign(vehicle, { ...updateVehicleDto, updated_by: updatedBy });
     return await this.vehicleRepository.save(vehicle);
   }
 

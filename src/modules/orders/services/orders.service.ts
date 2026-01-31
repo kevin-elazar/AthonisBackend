@@ -36,7 +36,14 @@ export class OrdersService {
         driver_id: createOrderDto.driver_id === 0 ? undefined : createOrderDto.driver_id,
       };
 
-      const order = this.orderRepository.create({ ...normalizedDto, id_company: idCompany });
+      const user = this.tenantContext.getUser();
+      const createdBy = user?.email ?? undefined;
+
+      const order = this.orderRepository.create({
+        ...normalizedDto,
+        id_company: idCompany,
+        created_by: createdBy,
+      });
       const savedOrder = await this.orderRepository.save(order);
       
       // Recarregar com relações para retornar os nomes
@@ -153,7 +160,11 @@ export class OrdersService {
         idCompany
       );
     }
-    Object.assign(order, updateOrderDto);
+
+    const user = this.tenantContext.getUser();
+    const updatedBy = user?.email ?? undefined;
+
+    Object.assign(order, { ...updateOrderDto, updated_by: updatedBy });
     const updatedOrder = await this.orderRepository.save(order);
     
     // Recarregar com relações para retornar os nomes

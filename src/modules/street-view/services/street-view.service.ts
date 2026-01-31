@@ -130,6 +130,9 @@ export class StreetViewService {
           : this.buildImageUrl(metadata.location?.lat, metadata.location?.lng))
       : null;
 
+    const user = this.tenantContext.getUser();
+    const createdBy = user?.email ?? undefined;
+
     const cacheEntry = this.streetViewCacheRepository.create({
       order_id: orderId,
       id_company: idCompany,
@@ -139,7 +142,8 @@ export class StreetViewService {
       latitude: metadata.location?.lat || null,
       longitude: metadata.location?.lng || null,
       capture_date: metadata.date || null,
-      image_url: imageUrl
+      image_url: imageUrl,
+      created_by: createdBy,
     });
 
     return await this.streetViewCacheRepository.save(cacheEntry);

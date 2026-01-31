@@ -17,7 +17,14 @@ export class DriversService {
 
   async create(createDriverDto: CreateDriverDto) {
     const idCompany = this.tenantContext.getIdCompany();
-    const driver = this.driverRepository.create({ ...createDriverDto, id_company: idCompany });
+    const user = this.tenantContext.getUser();
+    const createdBy = user?.email ?? undefined;
+
+    const driver = this.driverRepository.create({
+      ...createDriverDto,
+      id_company: idCompany,
+      created_by: createdBy,
+    });
     return await this.driverRepository.save(driver);
   }
 
@@ -90,7 +97,10 @@ export class DriversService {
 
   async update(id: string, updateDriverDto: UpdateDriverDto) {
     const driver = await this.findOne(id);
-    Object.assign(driver, updateDriverDto);
+    const user = this.tenantContext.getUser();
+    const updatedBy = user?.email ?? undefined;
+
+    Object.assign(driver, { ...updateDriverDto, updated_by: updatedBy });
     return await this.driverRepository.save(driver);
   }
 

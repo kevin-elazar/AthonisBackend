@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
 
 @Entity('driver')
 export class Driver {
@@ -19,4 +19,16 @@ export class Driver {
 
   @Column({ type: 'varchar', length: 14, nullable: true })
   document: string;
+
+  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  created_at!: Date;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  created_by?: string;
+
+  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  updated_at!: Date;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  updated_by?: string;
 }

@@ -17,7 +17,14 @@ export class ClientsService {
 
   async create(createClientDto: CreateClientDto) {
     const idCompany = this.tenantContext.getIdCompany();
-    const client = this.clientRepository.create({ ...createClientDto, id_company: idCompany });
+    const user = this.tenantContext.getUser();
+    const createdBy = user?.email ?? undefined;
+
+    const client = this.clientRepository.create({
+      ...createClientDto,
+      id_company: idCompany,
+      created_by: createdBy,
+    });
     return await this.clientRepository.save(client);
   }
 
@@ -95,7 +102,10 @@ export class ClientsService {
 
   async update(id: string, updateClientDto: UpdateClientDto) {
     const client = await this.findOne(id);
-    Object.assign(client, updateClientDto);
+    const user = this.tenantContext.getUser();
+    const updatedBy = user?.email ?? undefined;
+
+    Object.assign(client, { ...updateClientDto, updated_by: updatedBy });
     return await this.clientRepository.save(client);
   }
 

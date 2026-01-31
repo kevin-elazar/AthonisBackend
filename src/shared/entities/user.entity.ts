@@ -30,16 +30,18 @@ export class User {
   is_active: boolean;
 
   @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
-  created_at: Date;
+  created_at!: Date;
 
-  @UpdateDateColumn({ 
-    type: 'datetime', 
-    default: () => 'CURRENT_TIMESTAMP',
-    onUpdate: 'CURRENT_TIMESTAMP'
-  })
-  updated_at: Date;
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  created_by?: string;
+
+  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  updated_at!: Date;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  updated_by?: string;
 
   @Column({ type: 'datetime', nullable: true })
-  last_login: Date;
+  last_login?: Date;
 }
 

@@ -14,16 +14,6 @@ export class OptimizedRouteHistory {
   @Column({ type: 'int', default: 1000 })
   id_company: number;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
-  created_at: Date;
-
-  @UpdateDateColumn({ 
-    type: 'datetime', 
-    default: () => 'CURRENT_TIMESTAMP', 
-    onUpdate: 'CURRENT_TIMESTAMP' 
-  })
-  updated_at: Date;
-
   @Column({ type: 'simple-array' })
   order_ids: number[];
 
@@ -48,7 +38,16 @@ export class OptimizedRouteHistory {
   @Column({ type: 'text', nullable: true })
   notes: string;
 
+  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  created_at!: Date;
+
   @Column({ type: 'varchar', length: 50, nullable: true })
-  created_by: string;
+  created_by?: string;
+
+  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  updated_at!: Date;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  updated_by?: string;
 }
 

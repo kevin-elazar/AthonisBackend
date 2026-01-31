@@ -23,10 +23,14 @@ export class OptimizedRoutesHistoryService {
   async create(createDto: CreateOptimizedRouteHistoryDto): Promise<OptimizedRouteHistoryResponseDto> {
     try {
       const idCompany = this.tenantContext.getIdCompany();
+      const user = this.tenantContext.getUser();
+      const createdBy = user?.email ?? undefined;
+
       const history = this.historyRepository.create({
         ...createDto,
         id_company: idCompany,
         status: createDto.status || 'success',
+        created_by: createdBy,
       });
 
       const savedHistory = await this.historyRepository.save(history);
@@ -137,8 +141,11 @@ export class OptimizedRoutesHistoryService {
         throw new NotFoundException(`Histórico de rota com ID ${id} não encontrado`);
       }
 
+      const user = this.tenantContext.getUser();
+      const updatedBy = user?.email ?? undefined;
+
       // Atualizar campos
-      Object.assign(history, updateDto);
+      Object.assign(history, { ...updateDto, updated_by: updatedBy });
 
       const updatedHistory = await this.historyRepository.save(history);
       return this.mapToResponseDto(updatedHistory);
