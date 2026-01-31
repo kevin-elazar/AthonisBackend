@@ -5,6 +5,7 @@ import { OptimizedRouteHistory } from '../../shared/entities/optimized-route-his
 import { CreateOptimizedRouteHistoryDto } from '../dto/create-optimized-route-history.dto';
 import { UpdateOptimizedRouteHistoryDto } from '../dto/update-optimized-route-history.dto';
 import { OptimizedRouteHistoryResponseDto } from '../dto/optimized-route-history-response.dto';
+import { TenantContextService } from '../../shared/tenant/tenant-context.service';
 
 @Injectable()
 export class OptimizedRoutesHistoryService {
@@ -13,6 +14,7 @@ export class OptimizedRoutesHistoryService {
   constructor(
     @InjectRepository(OptimizedRouteHistory)
     private historyRepository: Repository<OptimizedRouteHistory>,
+    private tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -20,8 +22,10 @@ export class OptimizedRoutesHistoryService {
    */
   async create(createDto: CreateOptimizedRouteHistoryDto): Promise<OptimizedRouteHistoryResponseDto> {
     try {
+      const idCompany = this.tenantContext.getIdCompany();
       const history = this.historyRepository.create({
         ...createDto,
+        id_company: idCompany,
         status: createDto.status || 'success',
       });
 
@@ -38,7 +42,9 @@ export class OptimizedRoutesHistoryService {
    */
   async findAll(): Promise<OptimizedRouteHistoryResponseDto[]> {
     try {
+      const idCompany = this.tenantContext.getIdCompany();
       const histories = await this.historyRepository.find({
+        where: { id_company: idCompany },
         order: { created_at: 'DESC' }
       });
 
@@ -54,8 +60,9 @@ export class OptimizedRoutesHistoryService {
    */
   async findOne(id: number): Promise<OptimizedRouteHistoryResponseDto> {
     try {
+      const idCompany = this.tenantContext.getIdCompany();
       const history = await this.historyRepository.findOne({
-        where: { id }
+        where: { id, id_company: idCompany }
       });
 
       if (!history) {
@@ -74,6 +81,7 @@ export class OptimizedRoutesHistoryService {
    */
   async findByOrderIds(orderIds: number[]): Promise<OptimizedRouteHistoryResponseDto[]> {
     try {
+      const idCompany = this.tenantContext.getIdCompany();
       // Como order_ids é armazenado como simple-array (string separado por vírgula),
       // precisamos fazer uma busca mais específica
       const histories = await this.historyRepository
@@ -81,6 +89,7 @@ export class OptimizedRoutesHistoryService {
         .where('history.order_ids LIKE :orderIds', { 
           orderIds: `%${orderIds.join('%')}%` 
         })
+        .andWhere('history.id_company = :idCompany', { idCompany })
         .orderBy('history.created_at', 'DESC')
         .getMany();
 
@@ -96,12 +105,14 @@ export class OptimizedRoutesHistoryService {
    */
   async findByDateRange(startDate: Date, endDate: Date): Promise<OptimizedRouteHistoryResponseDto[]> {
     try {
+      const idCompany = this.tenantContext.getIdCompany();
       const histories = await this.historyRepository
         .createQueryBuilder('history')
         .where('history.created_at BETWEEN :startDate AND :endDate', {
           startDate,
           endDate
         })
+        .andWhere('history.id_company = :idCompany', { idCompany })
         .orderBy('history.created_at', 'DESC')
         .getMany();
 
@@ -117,8 +128,9 @@ export class OptimizedRoutesHistoryService {
    */
   async update(id: number, updateDto: UpdateOptimizedRouteHistoryDto): Promise<OptimizedRouteHistoryResponseDto> {
     try {
+      const idCompany = this.tenantContext.getIdCompany();
       const history = await this.historyRepository.findOne({
-        where: { id }
+        where: { id, id_company: idCompany }
       });
 
       if (!history) {
@@ -141,8 +153,9 @@ export class OptimizedRoutesHistoryService {
    */
   async remove(id: number): Promise<void> {
     try {
+      const idCompany = this.tenantContext.getIdCompany();
       const history = await this.historyRepository.findOne({
-        where: { id }
+        where: { id, id_company: idCompany }
       });
 
       if (!history) {

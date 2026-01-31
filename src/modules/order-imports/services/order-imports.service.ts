@@ -20,6 +20,7 @@ import { Client } from '../../../shared/entities/client.entity';
 import { Vehicle } from '../../../shared/entities/vehicle.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
 import { OrdersService } from '../../orders/services/orders.service';
+import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 import { CreateOrderDto } from '../../orders/dto/create-order.dto';
 import { ImportResultDto, OrderSuccessDto, OrderFailureDto } from '../dto/import-result.dto';
 import { RejectedFileListDto, RejectedFileDto } from '../dto/rejected-file-list.dto';
@@ -39,6 +40,7 @@ export class OrderImportsService {
     @InjectRepository(Driver)
     private driverRepository: Repository<Driver>,
     private ordersService: OrdersService,
+    private tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -145,35 +147,36 @@ export class OrderImportsService {
    */
   async validateReferences(orderData: any): Promise<{ isValid: boolean; errors: string[] }> {
     const errors: string[] = [];
+    const idCompany = this.tenantContext.getIdCompany();
 
     try {
-      // Validar client_id (obrigatório)
+      // Validar client_id (obrigatório) - deve pertencer à empresa do usuário
       if (orderData.client_id) {
         const client = await this.clientRepository.findOne({
-          where: { client_id: orderData.client_id }
+          where: { client_id: orderData.client_id, id_company: idCompany }
         });
         if (!client) {
-          errors.push(`Cliente com ID ${orderData.client_id} não existe no sistema`);
+          errors.push(`Cliente com ID ${orderData.client_id} não existe no sistema ou não pertence à sua empresa`);
         }
       }
 
       // Validar vehicle_id (opcional)
       if (orderData.vehicle_id) {
         const vehicle = await this.vehicleRepository.findOne({
-          where: { vehicle_id: orderData.vehicle_id }
+          where: { vehicle_id: orderData.vehicle_id, id_company: idCompany }
         });
         if (!vehicle) {
-          errors.push(`Veículo com ID ${orderData.vehicle_id} não existe no sistema`);
+          errors.push(`Veículo com ID ${orderData.vehicle_id} não existe no sistema ou não pertence à sua empresa`);
         }
       }
 
       // Validar driver_id (opcional)
       if (orderData.driver_id) {
         const driver = await this.driverRepository.findOne({
-          where: { driver_id: orderData.driver_id }
+          where: { driver_id: orderData.driver_id, id_company: idCompany }
         });
         if (!driver) {
-          errors.push(`Motorista com ID ${orderData.driver_id} não existe no sistema`);
+          errors.push(`Motorista com ID ${orderData.driver_id} não existe no sistema ou não pertence à sua empresa`);
         }
       }
 

@@ -11,6 +11,9 @@ export class OptimizedRouteHistory {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ type: 'int', default: 1000 })
+  id_company: number;
+
   @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
   created_at: Date;
 

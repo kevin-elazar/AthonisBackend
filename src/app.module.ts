@@ -12,10 +12,12 @@ import { StreetViewModule } from './modules/street-view/street-view.module';
 
 import { APP_FILTER } from '@nestjs/core';
 import { HttpExceptionFilter } from './filters/http-exception.filter';
+import { TenantModule } from './shared/tenant/tenant.module';
 
 @Module({
   imports: [
     TypeOrmModule.forRoot(databaseConfig),
+    TenantModule,
     AuthModule,
     ClientsModule,
     OrdersModule,

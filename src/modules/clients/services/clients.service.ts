@@ -5,16 +5,19 @@ import { Client } from '../../../shared/entities/client.entity';
 import { CreateClientDto } from '../dto/create-client.dto';
 import { UpdateClientDto } from '../dto/update-client.dto';
 import { FindClientDto } from '../dto/find-client.dto';
+import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 
 @Injectable()
 export class ClientsService {
   constructor(
     @InjectRepository(Client)
     private clientRepository: Repository<Client>,
+    private tenantContext: TenantContextService,
   ) {}
 
   async create(createClientDto: CreateClientDto) {
-    const client = this.clientRepository.create(createClientDto);
+    const idCompany = this.tenantContext.getIdCompany();
+    const client = this.clientRepository.create({ ...createClientDto, id_company: idCompany });
     return await this.clientRepository.save(client);
   }
 
@@ -31,6 +34,7 @@ export class ClientsService {
       } = query;
   
       const where = this.buildSearchConditions({ name, document, type });
+      where.id_company = this.tenantContext.getIdCompany();
   
       const allowedFields = ['name', 'document', 'type', 'created_at'];
       if (!allowedFields.includes(sort_by)) {
@@ -81,7 +85,8 @@ export class ClientsService {
   }
 
   async findOne(id: string) {
-    const client = await this.clientRepository.findOne({ where: { client_id: Number(id) } });
+    const idCompany = this.tenantContext.getIdCompany();
+    const client = await this.clientRepository.findOne({ where: { client_id: Number(id), id_company: idCompany } });
     if (!client) {
       throw new NotFoundException(`Client ID ${id} not found`);
     }

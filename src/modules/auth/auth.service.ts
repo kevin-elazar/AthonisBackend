@@ -7,6 +7,7 @@ import { User } from '../../shared/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { TenantContextService } from '../../shared/tenant/tenant-context.service';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private jwtService: JwtService,
+    private tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -36,12 +38,14 @@ export class AuthService {
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(registerDto.password, saltRounds);
 
-      // Criar usuário
+      // Criar usuário com id_company do admin que está registrando
+      const idCompany = this.tenantContext.getIdCompany();
       const user = this.userRepository.create({
         email: registerDto.email,
         password: hashedPassword,
         name: registerDto.name,
         role: registerDto.role || 'user',
+        id_company: idCompany,
         is_active: true,
       });
 
@@ -137,7 +141,8 @@ export class AuthService {
     const payload = { 
       sub: user.id, 
       email: user.email,
-      role: user.role 
+      role: user.role,
+      id_company: user.id_company 
     };
 
     const access_token = this.jwtService.sign(payload);
@@ -151,6 +156,7 @@ export class AuthService {
         email: user.email,
         name: user.name,
         role: user.role,
+        id_company: user.id_company,
       },
     };
   }

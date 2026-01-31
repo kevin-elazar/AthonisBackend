@@ -9,6 +9,7 @@ import { OptimizationResultDto, OptimizedRoute, RouteStop } from '../dto/optimiz
 import { GeocodingService } from './geocoding.service';
 import { OptimizedRoutesHistoryService } from './optimized-routes-history.service';
 import { GoogleMapsRouteOptimization } from '../server';
+import { TenantContextService } from '../../shared/tenant/tenant-context.service';
 
 @Injectable()
 export class OptimizationRoutesService {
@@ -28,6 +29,7 @@ export class OptimizationRoutesService {
     private geocodingService: GeocodingService,
     @Inject(forwardRef(() => OptimizedRoutesHistoryService))
     private historyService: OptimizedRoutesHistoryService,
+    private tenantContext: TenantContextService,
   ) {
     // Inicializar cliente do Google Maps se as credenciais estiverem disponíveis
     const projectId = process.env.GOOGLE_PROJECT_ID;
@@ -41,9 +43,10 @@ export class OptimizationRoutesService {
     invalidOrders: number[];
   }> {
     try {
-      // Buscar todos os pedidos solicitados
+      const idCompany = this.tenantContext.getIdCompany();
+      // Buscar todos os pedidos solicitados (filtrando por empresa)
       const orders = await this.orderRepository.find({
-        where: orderIds.map(id => ({ order_id: id })),
+        where: orderIds.map(id => ({ order_id: id, id_company: idCompany })),
         relations: ['client', 'driver', 'vehicle']
       });
 
@@ -187,12 +190,14 @@ export class OptimizationRoutesService {
   }
 
   private async getOrdersWithDetails(orderIds: number[]): Promise<any[]> {
+    const idCompany = this.tenantContext.getIdCompany();
     return await this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.client', 'client')
       .leftJoinAndSelect('order.driver', 'driver')
       .leftJoinAndSelect('order.vehicle', 'vehicle')
       .where('order.order_id IN (:...ids)', { ids: orderIds })
+      .andWhere('order.id_company = :idCompany', { idCompany })
       .getMany();
   }
 

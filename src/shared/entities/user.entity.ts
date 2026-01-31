@@ -23,6 +23,9 @@ export class User {
   @Column({ type: 'varchar', length: 50, default: 'user' })
   role: string; // 'admin', 'user', 'driver', etc.
 
+  @Column({ type: 'int', default: 1000 })
+  id_company: number; // Código da empresa (0-9999)
+
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 

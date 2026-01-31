@@ -5,16 +5,19 @@ import { Driver } from '../../../shared/entities/driver.entity';
 import { CreateDriverDto } from '../dto/create-driver.dto';
 import { UpdateDriverDto } from '../dto/update-driver.dto';
 import { FindDriverDto } from '../dto/find-driver.dto';
+import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 
 @Injectable()
 export class DriversService {
   constructor(
     @InjectRepository(Driver)
     private driverRepository: Repository<Driver>,
+    private tenantContext: TenantContextService,
   ) {}
 
   async create(createDriverDto: CreateDriverDto) {
-    const driver = this.driverRepository.create(createDriverDto);
+    const idCompany = this.tenantContext.getIdCompany();
+    const driver = this.driverRepository.create({ ...createDriverDto, id_company: idCompany });
     return await this.driverRepository.save(driver);
   }
 
@@ -30,6 +33,7 @@ export class DriversService {
       } = query;
   
       const where = this.buildSearchConditions({ name, document });
+      where.id_company = this.tenantContext.getIdCompany();
   
       const allowedFields = ['name', 'document', 'birth_date'];
       if (!allowedFields.includes(sort_by)) {
@@ -76,7 +80,8 @@ export class DriversService {
   }
 
   async findOne(id: string) {
-    const driver = await this.driverRepository.findOne({ where: { driver_id: Number(id) } });
+    const idCompany = this.tenantContext.getIdCompany();
+    const driver = await this.driverRepository.findOne({ where: { driver_id: Number(id), id_company: idCompany } });
     if (!driver) {
       throw new NotFoundException(`Driver ID ${id} not found`);
     }

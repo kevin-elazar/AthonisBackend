@@ -15,6 +15,9 @@ export class Order {
   @PrimaryGeneratedColumn()
   order_id: number;
 
+  @Column({ type: 'int', default: 1000 })
+  id_company: number;
+
   @Column({ type: 'int' })
   client_id: number;
 

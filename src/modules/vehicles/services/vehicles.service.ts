@@ -5,16 +5,19 @@ import { Vehicle } from '../../../shared/entities/vehicle.entity';
 import { CreateVehicleDto } from '../dto/create-vehicle.dto';
 import { UpdateVehicleDto } from '../dto/update-vehicle.dto';
 import { FindVehicleDto } from '../dto/find-vehicle.dto';
+import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 
 @Injectable()
 export class VehiclesService {
   constructor(
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
+    private tenantContext: TenantContextService,
   ) {}
 
   async create(createVehicleDto: CreateVehicleDto) {
-    const vehicle = this.vehicleRepository.create(createVehicleDto);
+    const idCompany = this.tenantContext.getIdCompany();
+    const vehicle = this.vehicleRepository.create({ ...createVehicleDto, id_company: idCompany });
     return await this.vehicleRepository.save(vehicle);
   }
 
@@ -30,6 +33,7 @@ export class VehiclesService {
       } = query;
   
       const where = this.buildSearchConditions({ name, brand });
+      where.id_company = this.tenantContext.getIdCompany();
   
       const allowedFields = ['name', 'brand', 'model', 'year'];
       if (!allowedFields.includes(sort_by)) {
@@ -76,7 +80,8 @@ export class VehiclesService {
   }
 
   async findOne(id: string) {
-    const vehicle = await this.vehicleRepository.findOne({ where: { vehicle_id: Number(id) } });
+    const idCompany = this.tenantContext.getIdCompany();
+    const vehicle = await this.vehicleRepository.findOne({ where: { vehicle_id: Number(id), id_company: idCompany } });
     if (!vehicle) {
       throw new NotFoundException(`Vehicle ID ${id} not found`);
     }

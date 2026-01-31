@@ -6,15 +6,20 @@ import {
   UpdateDateColumn,
   OneToOne,
   JoinColumn,
+  Unique,
 } from 'typeorm';
 import { Order } from './order.entity';
 
 @Entity('street_view_cache')
+@Unique(['id_company', 'order_id'])
 export class StreetViewCache {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'int', unique: true })
+  @Column({ type: 'int', default: 1000 })
+  id_company: number;
+
+  @Column({ type: 'int' })
   order_id: number;
 
   @OneToOne(() => Order)

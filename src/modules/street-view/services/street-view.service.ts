@@ -5,6 +5,7 @@ import axios from 'axios';
 import { StreetViewCache } from '../../../shared/entities/street-view-cache.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { StreetViewResponseDto } from '../dto/street-view-response.dto';
+import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 
 interface StreetViewMetadataResponse {
   status: string;
@@ -29,6 +30,7 @@ export class StreetViewService {
     private streetViewCacheRepository: Repository<StreetViewCache>,
     @InjectRepository(Order)
     private orderRepository: Repository<Order>,
+    private tenantContext: TenantContextService,
   ) {
     // Reutiliza a mesma chave do Geocoding
     this.apiKey = process.env.GOOGLE_GEOCODING_API_KEY;
@@ -39,9 +41,11 @@ export class StreetViewService {
 
   async getStreetViewData(orderId: number): Promise<StreetViewResponseDto> {
     try {
-      // 1. Buscar o pedido
+      const idCompany = this.tenantContext.getIdCompany();
+
+      // 1. Buscar o pedido (filtrando por empresa)
       const order = await this.orderRepository.findOne({
-        where: { order_id: orderId }
+        where: { order_id: orderId, id_company: idCompany }
       });
 
       if (!order) {
@@ -50,7 +54,7 @@ export class StreetViewService {
 
       // 2. Verificar se já existe cache
       const cachedData = await this.streetViewCacheRepository.findOne({
-        where: { order_id: orderId }
+        where: { order_id: orderId, id_company: idCompany }
       });
 
       if (cachedData) {
@@ -64,7 +68,7 @@ export class StreetViewService {
       const streetViewData = await this.fetchStreetViewMetadata(address);
 
       // 4. Salvar no cache
-      const cacheEntry = await this.saveToCache(orderId, address, streetViewData);
+      const cacheEntry = await this.saveToCache(orderId, idCompany, address, streetViewData);
 
       // 5. Retornar resposta formatada
       return this.formatResponse(cacheEntry);
@@ -114,7 +118,8 @@ export class StreetViewService {
   }
 
   private async saveToCache(
-    orderId: number, 
+    orderId: number,
+    idCompany: number,
     address: string, 
     metadata: StreetViewMetadataResponse
   ): Promise<StreetViewCache> {
@@ -127,6 +132,7 @@ export class StreetViewService {
 
     const cacheEntry = this.streetViewCacheRepository.create({
       order_id: orderId,
+      id_company: idCompany,
       address: address,
       status: metadata.status,
       pano_id: metadata.pano_id || null,
@@ -253,7 +259,8 @@ export class StreetViewService {
 
   // Método para invalidar cache (útil se precisar forçar atualização)
   async invalidateCache(orderId: number): Promise<void> {
-    await this.streetViewCacheRepository.delete({ order_id: orderId });
+    const idCompany = this.tenantContext.getIdCompany();
+    await this.streetViewCacheRepository.delete({ order_id: orderId, id_company: idCompany });
     this.logger.log(`Cache do Street View invalidado para pedido ${orderId}`);
   }
 

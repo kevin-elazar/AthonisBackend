@@ -5,6 +5,9 @@ export class Driver {
   @PrimaryGeneratedColumn()
   driver_id: number;
 
+  @Column({ type: 'int', default: 1000 })
+  id_company: number;
+
   @Column({ type: 'varchar', length: 100 })
   name: string;
 
