@@ -1,20 +1,13 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, BadRequestException, Logger, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
-import { plainToClass } from 'class-transformer';
-import { validate } from 'class-validator';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { ClientsService } from '../services/clients.service';
 import { CreateClientDto } from '../dto/create-client.dto';
 import { UpdateClientDto } from '../dto/update-client.dto';
 import { FindClientDto } from '../dto/find-client.dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
 @ApiTags('Clientes')
 @Controller('clients')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('JWT-auth')
 export class ClientsController {
-  private readonly logger = new Logger(ClientsController.name);
-
   constructor(private readonly clientsService: ClientsService) { }
 
   @Post()
@@ -39,33 +32,9 @@ export class ClientsController {
     }
   })
   @ApiResponse({ status: 400, description: 'Dados inválidos ou duplicados' })
-  async create(@Body() data: any) {
-    try {
-      const clientDto = plainToClass(CreateClientDto, data);
-      const errors = await validate(clientDto);
-
-      if (errors.length > 0) {
-        this.logger.debug('Validation errors:', errors);
-        
-        const validationErrors = errors.map(error => ({
-          field: error.property,
-          messages: Object.values(error.constraints || {})
-        }));
-
-        throw new BadRequestException({
-          statusCode: 400,
-          message: 'Falha na validação dos dados',
-          errors: validationErrors
-        });
-      }
-
-      const result = await this.clientsService.create(clientDto);
-      return { success: true, data: result };
-
-    } catch (error) {
-      this.logger.error('Error in create:', error);
-      throw error;
-    }
+  async create(@Body() createClientDto: CreateClientDto) {
+    const result = await this.clientsService.create(createClientDto);
+    return { success: true, data: result };
   }
 
   @Get()

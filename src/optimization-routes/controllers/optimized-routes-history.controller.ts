@@ -12,11 +12,8 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { OptimizedRoutesHistoryService } from '../services/optimized-routes-history.service';
 import { OptimizedRouteHistoryResponseDto } from '../dto/optimized-route-history-response.dto';
-import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard';
-
 @ApiTags('Histórico de Rotas Otimizadas')
 @Controller('optimized-routes-history')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('JWT-auth')
 export class OptimizedRoutesHistoryController {
   constructor(

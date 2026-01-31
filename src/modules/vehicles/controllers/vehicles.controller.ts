@@ -4,11 +4,8 @@ import { VehiclesService } from '../services/vehicles.service';
 import { CreateVehicleDto } from '../dto/create-vehicle.dto';
 import { UpdateVehicleDto } from '../dto/update-vehicle.dto';
 import { FindVehicleDto } from '../dto/find-vehicle.dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
 @ApiTags('Veículos')
 @Controller('vehicles')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('JWT-auth')
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}

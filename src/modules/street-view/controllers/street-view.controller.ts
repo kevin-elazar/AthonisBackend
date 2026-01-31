@@ -20,11 +20,9 @@ import {
 } from '@nestjs/swagger';
 import { StreetViewService } from '../services/street-view.service';
 import { StreetViewResponseDto, StreetViewBatchRequestDto } from '../dto/street-view-response.dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @ApiTags('Street View')
 @Controller('street-view')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('JWT-auth')
 export class StreetViewController {
   constructor(private readonly streetViewService: StreetViewService) {}

@@ -15,3 +15,7 @@ logs
 
 # Client secret
 client_secret.json
+
+# Test
+test-db.sqlite
+coverage/

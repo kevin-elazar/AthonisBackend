@@ -4,11 +4,8 @@ import { OrdersService } from '../services/orders.service';
 import { CreateOrderDto } from '../dto/create-order.dto';
 import { UpdateOrderDto } from '../dto/update-order.dto';
 import { FindOrderDto } from '../dto/find-order.dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
 @ApiTags('Pedidos')
 @Controller('orders')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('JWT-auth')
 export class OrdersController {
   private readonly logger = new Logger(OrdersController.name);

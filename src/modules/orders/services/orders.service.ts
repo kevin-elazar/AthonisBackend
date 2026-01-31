@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, FindOptionsWhere } from 'typeorm';
 import { Order } from '../../../shared/entities/order.entity';
@@ -12,6 +12,8 @@ import { TenantContextService } from '../../../shared/tenant/tenant-context.serv
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order)
     private orderRepository: Repository<Order>,
@@ -52,7 +54,7 @@ export class OrdersService {
         relations: ['client', 'driver', 'vehicle']
       });
     } catch (error) {
-      console.error('Error creating order:', {
+      this.logger.error('Error creating order:', {
         message: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
         data: createOrderDto

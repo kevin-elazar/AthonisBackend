@@ -10,7 +10,7 @@ import { User } from '../../shared/entities/user.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([User]),
-    PassportModule.register({ defaultStrategy: 'jwt' }),
+    PassportModule.register({ defaultStrategy: 'jwt', session: false }),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
       signOptions: { 

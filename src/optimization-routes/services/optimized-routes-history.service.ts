@@ -82,22 +82,27 @@ export class OptimizedRoutesHistoryService {
 
   /**
    * Busca históricos por IDs de pedidos
+   * Retorna históricos que contêm pelo menos um dos orderIds informados
    */
   async findByOrderIds(orderIds: number[]): Promise<OptimizedRouteHistoryResponseDto[]> {
     try {
       const idCompany = this.tenantContext.getIdCompany();
-      // Como order_ids é armazenado como simple-array (string separado por vírgula),
-      // precisamos fazer uma busca mais específica
-      const histories = await this.historyRepository
-        .createQueryBuilder('history')
-        .where('history.order_ids LIKE :orderIds', { 
-          orderIds: `%${orderIds.join('%')}%` 
-        })
-        .andWhere('history.id_company = :idCompany', { idCompany })
-        .orderBy('history.created_at', 'DESC')
-        .getMany();
+      const orderIdSet = new Set(orderIds.map(id => Number(id)));
 
-      return histories.map(history => this.mapToResponseDto(history));
+      const histories = await this.historyRepository.find({
+        where: { id_company: idCompany },
+        order: { created_at: 'DESC' },
+      });
+
+      // Filtrar em memória para matching exato de IDs (evita falsos positivos do LIKE)
+      const filtered = histories.filter(history => {
+        const historyIds = Array.isArray(history.order_ids)
+          ? history.order_ids
+          : String(history.order_ids).split(',').map(id => Number(id.trim()));
+        return historyIds.some(id => orderIdSet.has(id));
+      });
+
+      return filtered.map(history => this.mapToResponseDto(history));
     } catch (error) {
       this.logger.error('Erro ao buscar históricos por order IDs:', error);
       throw error;

@@ -6,7 +6,6 @@ import {
   Query,
   UseInterceptors, 
   UploadedFile, 
-  UseGuards,
   BadRequestException,
   Logger,
   StreamableFile,
@@ -22,7 +21,6 @@ import {
   ApiParam,
   ApiBody
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { OrderImportsService } from '../services/order-imports.service';
 import { ImportResultDto } from '../dto/import-result.dto';
 import { RejectedFileListDto } from '../dto/rejected-file-list.dto';
@@ -32,7 +30,6 @@ import type { Response as ExpressResponse } from 'express';
 
 @ApiTags('Importação de Pedidos')
 @Controller('order-imports')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('JWT-auth')
 export class OrderImportsController {
   private readonly logger = new Logger(OrderImportsController.name);

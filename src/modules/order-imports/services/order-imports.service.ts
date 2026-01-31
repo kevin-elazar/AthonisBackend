@@ -600,6 +600,9 @@ export class OrderImportsService {
       };
     } catch (error) {
       this.logger.error(`Erro ao listar arquivos de rejeição: ${error}`);
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
       throw new InternalServerErrorException('Erro ao listar arquivos de rejeição');
     }
   }
