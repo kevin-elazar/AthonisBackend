@@ -15,7 +15,7 @@
 -- ==========================================
 
 INSERT INTO user (id_company, email, password, name, role, created_at, created_by, updated_at, updated_by) VALUES
-(-1, 'admin@athonis.com', 'admin123', 'Admin', 'admin', datetime('now'), 'sistema', datetime('now'), 'sistema');
+(-1, 'admin@athonis.com', '$2b$10$3k85YQUskpmuuHjMvViSxeffPRW9QzMxxOkL.hxwLdXtmsAvWkxGS', 'Admin', 'admin', datetime('now'), 'sistema', datetime('now'), 'sistema');
 
 -- ==========================================
 -- INSERÇÃO DE CLIENTES (5 clientes)
