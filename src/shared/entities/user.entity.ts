@@ -24,8 +24,13 @@ export class User {
   @Column({ type: 'varchar', length: 50, default: 'user' })
   role: UserRole;
 
-  @Column({ type: 'int', default: 1000 })
-  id_company: number; // Código da empresa (0-9999)
+  /**
+   * Empresa dona da linha. Sem valor padrao de proposito: o TenantContext e
+   * quem preenche, e uma insercao que escape dele deve falhar em vez de
+   * gravar silenciosamente numa empresa que talvez nem exista.
+   */
+  @Column({ type: 'int' })
+  id_company: number;
 
   @Column({ type: 'boolean', default: true })
   is_active: boolean;

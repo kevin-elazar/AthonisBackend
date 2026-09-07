@@ -11,7 +11,12 @@ export class OptimizedRouteHistory {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'int', default: 1000 })
+  /**
+   * Empresa dona da linha. Sem valor padrao de proposito: o TenantContext e
+   * quem preenche, e uma insercao que escape dele deve falhar em vez de
+   * gravar silenciosamente numa empresa que talvez nem exista.
+   */
+  @Column({ type: 'int' })
   id_company: number;
 
   @Column({ type: 'simple-array' })
