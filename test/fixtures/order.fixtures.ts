@@ -4,7 +4,7 @@
 export const createOrderDto = {
   client_id: 1,
   title: 'Entrega de mercadorias',
-  urgency: 'normal',
+  urgency: 'normal' as const,
   quantity: 10,
   delivery_street: 'Rua das Flores',
   delivery_district: 'Centro',

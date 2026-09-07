@@ -7,8 +7,10 @@ package-lock.json
 logs
 *.log
 
-# Database
-#src/database/*.sqlite
+# Database (nunca versionar: contém hash de senha e PII de clientes)
+src/database/*.sqlite
+src/database/*.sqlite-journal
+*.sqlite
 
 # Environment
 .env

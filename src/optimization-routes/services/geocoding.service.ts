@@ -1,5 +1,6 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import axios from 'axios';
+import { config } from '../../config/env.config';
 
 export interface GeocodingResult {
   latitude: number;
@@ -15,7 +16,7 @@ export class GeocodingService {
   private readonly baseUrl = 'https://maps.googleapis.com/maps/api/geocode/json';
 
   constructor() {
-    this.apiKey = process.env.GOOGLE_GEOCODING_API_KEY;
+    this.apiKey = config.google.geocodingApiKey;
     if (!this.apiKey) {
       this.logger.warn('GOOGLE_GEOCODING_API_KEY não configurada. Geocoding não funcionará.');
     }
@@ -72,15 +73,23 @@ export class GeocodingService {
     }
   }
 
-  async geocodeMultipleAddresses(addresses: string[]): Promise<GeocodingResult[]> {
-    const results: GeocodingResult[] = [];
-    
+  /**
+   * Geocodifica vários endereços preservando a posição de cada um.
+   *
+   * O array devolvido tem SEMPRE o mesmo tamanho da entrada: um endereço que
+   * falha vira `null` na própria posição. Filtrar os nulos aqui encurtaria o
+   * array e faria o chamador casar coordenada de um pedido com outro — ou
+   * seja, entregar no endereço errado.
+   */
+  async geocodeMultipleAddresses(addresses: string[]): Promise<(GeocodingResult | null)[]> {
+    const results: (GeocodingResult | null)[] = [];
+
     // Processar em lotes para evitar rate limiting
     const batchSize = 5;
     for (let i = 0; i < addresses.length; i += batchSize) {
       const batch = addresses.slice(i, i + batchSize);
-      
-      const batchPromises = batch.map(address => 
+
+      const batchPromises = batch.map(address =>
         this.geocodeAddress(address).catch(error => {
           this.logger.warn(`Falha no geocoding para: ${address}`, error.message);
           return null;
@@ -88,8 +97,8 @@ export class GeocodingService {
       );
 
       const batchResults = await Promise.all(batchPromises);
-      results.push(...batchResults.filter(result => result !== null));
-      
+      results.push(...batchResults);
+
       // Pequena pausa entre lotes
       if (i + batchSize < addresses.length) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -97,6 +106,11 @@ export class GeocodingService {
     }
 
     return results;
+  }
+
+  /** Indica se o geocoding real está disponível (chave configurada). */
+  isConfigured(): boolean {
+    return !!this.apiKey;
   }
 
   // Método para coordenadas simuladas (fallback quando API não está disponível)

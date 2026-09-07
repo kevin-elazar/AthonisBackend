@@ -10,6 +10,7 @@ import { Client } from '../shared/entities/client.entity';
 import { Driver } from '../shared/entities/driver.entity';
 import { Vehicle } from '../shared/entities/vehicle.entity';
 import { OptimizedRouteHistory } from '../shared/entities/optimized-route-history.entity';
+import { CompanyModule } from '../modules/company/company.module';
 
 @Module({
   imports: [
@@ -19,7 +20,9 @@ import { OptimizedRouteHistory } from '../shared/entities/optimized-route-histor
       Driver, 
       Vehicle,
       OptimizedRouteHistory
-    ])
+    ]),
+    // Depósito, custos e tempo de parada vêm do cadastro da empresa.
+    CompanyModule
   ],
   controllers: [
     OptimizationRoutesController,

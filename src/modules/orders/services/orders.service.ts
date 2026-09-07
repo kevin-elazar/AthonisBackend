@@ -34,6 +34,7 @@ export class OrdersService {
       // Normalizar IDs: converter 0 para undefined (NULL no banco)
       const normalizedDto = {
         ...createOrderDto,
+        client_id: createOrderDto.client_id === 0 ? undefined : createOrderDto.client_id,
         vehicle_id: createOrderDto.vehicle_id === 0 ? undefined : createOrderDto.vehicle_id,
         driver_id: createOrderDto.driver_id === 0 ? undefined : createOrderDto.driver_id,
       };
@@ -87,14 +88,16 @@ export class OrdersService {
         limit = 10, 
         title, 
         urgency,
+        status,
+        client_id,
         sort_by = 'order_id',
         order = 'DESC' 
       } = query;
   
-      const where = this.buildSearchConditions({ title, urgency });
+      const where = this.buildSearchConditions({ title, urgency, status, client_id });
       where.id_company = this.tenantContext.getIdCompany();
   
-      const allowedFields = ['title', 'urgency', 'order_id'];
+      const allowedFields = ['title', 'urgency', 'status', 'order_id', 'created_at'];
       if (!allowedFields.includes(sort_by)) {
         throw new BadRequestException(`Invalid sort field. Allowed: ${allowedFields.join(', ')}`);
       }
@@ -104,8 +107,7 @@ export class OrdersService {
         relations: ['client', 'driver', 'vehicle'],
         order: { [sort_by]: order },
         skip: (page - 1) * limit,
-        take: limit,
-        cache: true
+        take: limit
       });
   
       return {
@@ -125,7 +127,7 @@ export class OrdersService {
     }
   }
 
-  private buildSearchConditions({ title, urgency }: Partial<FindOrderDto>) {
+  private buildSearchConditions({ title, urgency, status, client_id }: Partial<FindOrderDto>) {
     const where: FindOptionsWhere<Order> = {};
 
     if (title) {
@@ -134,6 +136,14 @@ export class OrdersService {
 
     if (urgency) {
       where.urgency = urgency;
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (client_id) {
+      where.client_id = client_id;
     }
 
     return where;
@@ -156,7 +166,7 @@ export class OrdersService {
     const idCompany = this.tenantContext.getIdCompany();
     if (updateOrderDto.client_id || updateOrderDto.vehicle_id || updateOrderDto.driver_id) {
       await this.validateOrderReferences(
-        updateOrderDto.client_id ?? order.client_id,
+        updateOrderDto.client_id ?? order.client_id ?? undefined,
         updateOrderDto.vehicle_id ?? order.vehicle_id ?? 0,
         updateOrderDto.driver_id ?? order.driver_id ?? 0,
         idCompany
@@ -176,11 +186,16 @@ export class OrdersService {
     });
   }
 
-  private async validateOrderReferences(clientId: number, vehicleId?: number, driverId?: number, idCompany?: number): Promise<void> {
+  private async validateOrderReferences(clientId?: number, vehicleId?: number, driverId?: number, idCompany?: number): Promise<void> {
     const company = idCompany ?? this.tenantContext.getIdCompany();
-    const client = await this.clientRepository.findOne({ where: { client_id: clientId, id_company: company } });
-    if (!client) {
-      throw new BadRequestException(`Cliente com ID ${clientId} não existe ou não pertence à sua empresa`);
+
+    // Pedido sem cliente é válido (entrega avulsa); se veio um ID, ele precisa
+    // existir e pertencer à empresa.
+    if (clientId) {
+      const client = await this.clientRepository.findOne({ where: { client_id: clientId, id_company: company } });
+      if (!client) {
+        throw new BadRequestException(`Cliente com ID ${clientId} não existe ou não pertence à sua empresa`);
+      }
     }
     if (vehicleId) {
       const vehicle = await this.vehicleRepository.findOne({ where: { vehicle_id: vehicleId, id_company: company } });

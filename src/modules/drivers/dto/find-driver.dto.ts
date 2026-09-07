@@ -1,14 +1,18 @@
-import { IsOptional, IsString, IsNumber } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { DRIVER_STATUSES, DriverStatus } from '../../../shared/domain/enums';
 
 export class FindDriverDto {
   @ApiProperty({ description: 'Número da página', example: 1, required: false })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   page?: number;
 
   @ApiProperty({ description: 'Itens por página', example: 10, required: false })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   limit?: number;
 
@@ -31,4 +35,9 @@ export class FindDriverDto {
   @IsOptional()
   @IsString()
   order?: 'ASC' | 'DESC';
+
+  @ApiProperty({ description: 'Disponibilidade', enum: DRIVER_STATUSES, required: false })
+  @IsOptional()
+  @IsIn(DRIVER_STATUSES)
+  status?: DriverStatus;
 }

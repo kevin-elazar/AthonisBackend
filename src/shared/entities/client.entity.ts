@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { ClientStatus } from '../domain/enums';
 
 @Entity('client')
 export class Client {
@@ -55,6 +56,9 @@ export class Client {
 
   @Column({ type: 'text', nullable: true })
   notes?: string;
+
+  @Column({ type: 'varchar', length: 20, default: 'active' })
+  status: ClientStatus;
 
   @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;

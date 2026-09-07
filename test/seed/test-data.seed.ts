@@ -6,7 +6,7 @@ const TEST_USER = {
   email: 'admin@athonis.com',
   password: 'admin123',
   name: 'Admin',
-  role: 'admin',
+  role: 'admin' as const,
   id_company: 1000,
   is_active: true,
 };

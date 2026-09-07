@@ -24,7 +24,7 @@ describe('AuthService', () => {
     email: 'admin@athonis.com',
     password: 'hashedPassword',
     name: 'Admin',
-    role: 'admin',
+    role: 'admin' as const,
     id_company: 1000,
     is_active: true,
     created_at: new Date(),
@@ -120,7 +120,7 @@ describe('AuthService', () => {
         expect.objectContaining({
           email: registerDto.email,
           name: registerDto.name,
-          role: 'user',
+          role: 'user' as const,
           id_company: 1000,
           is_active: true,
           created_by: 'admin@athonis.com',

@@ -51,16 +51,17 @@ describe('GeocodingService', () => {
     });
 
     it('deve lançar HttpException quando API key não configurada', async () => {
-      const originalKey = process.env.GOOGLE_GEOCODING_API_KEY;
-      delete process.env.GOOGLE_GEOCODING_API_KEY;
       const module = await Test.createTestingModule({
         providers: [GeocodingService],
       }).compile();
       const serviceWithoutKey = module.get<GeocodingService>(GeocodingService);
 
-      await expect(serviceWithoutKey.geocodeAddress('Rua Teste')).rejects.toThrow(HttpException);
+      // A chave passou a vir do config central (lido uma vez no boot), então
+      // o teste zera o campo em vez de mexer em process.env.
+      (serviceWithoutKey as unknown as { apiKey?: string }).apiKey = undefined;
 
-      process.env.GOOGLE_GEOCODING_API_KEY = originalKey || 'test-api-key';
+      expect(serviceWithoutKey.isConfigured()).toBe(false);
+      await expect(serviceWithoutKey.geocodeAddress('Rua Teste')).rejects.toThrow(HttpException);
     });
 
     it('deve lançar HttpException quando status !== OK', async () => {
@@ -87,18 +88,24 @@ describe('GeocodingService', () => {
       expect(result[0]).toHaveProperty('longitude');
     });
 
-    it('deve filtrar nulls quando algum endereço falha', async () => {
+    it('preserva a posição de cada endereço, devolvendo null no que falhou', async () => {
       mockedAxios.get
         .mockResolvedValueOnce(mockGeocodeResponse)
-        .mockRejectedValueOnce(new Error('Network error'));
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockResolvedValueOnce(mockGeocodeResponse);
 
       const result = await service.geocodeMultipleAddresses([
         'Rua 1, São Paulo',
         'Endereço inválido',
+        'Rua 3, São Paulo',
       ]);
 
-      expect(result).toHaveLength(1);
+      // O array precisa ter o MESMO tamanho da entrada: encurtá-lo faria o
+      // chamador casar a coordenada de um pedido com outro pedido.
+      expect(result).toHaveLength(3);
       expect(result[0]).toHaveProperty('latitude', -23.5505);
+      expect(result[1]).toBeNull();
+      expect(result[2]).toHaveProperty('latitude', -23.5505);
     });
   });
 

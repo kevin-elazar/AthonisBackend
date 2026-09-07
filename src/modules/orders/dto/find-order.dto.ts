@@ -1,34 +1,69 @@
-import { IsOptional, IsString, IsNumber } from 'class-validator';
+import { IsOptional, IsString, IsInt, IsIn, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  ORDER_STATUSES,
+  ORDER_URGENCIES,
+  OrderStatus,
+  OrderUrgency,
+} from '../../../shared/domain/enums';
 
 export class FindOrderDto {
-  @ApiProperty({ description: 'Número da página', example: 1, required: false })
+  @ApiProperty({ description: 'Numero da pagina', example: 1, required: false })
   @IsOptional()
-  @IsNumber()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
 
-  @ApiProperty({ description: 'Itens por página', example: 10, required: false })
+  @ApiProperty({ description: 'Itens por pagina', example: 10, required: false })
   @IsOptional()
-  @IsNumber()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   limit?: number;
 
-  @ApiProperty({ description: 'Título do pedido', example: 'Entrega', required: false })
+  @ApiProperty({ description: 'Titulo do pedido', example: 'Entrega', required: false })
   @IsOptional()
   @IsString()
   title?: string;
 
-  @ApiProperty({ description: 'Urgência do pedido', example: 'normal', required: false })
+  @ApiProperty({
+    description: 'Urgencia do pedido',
+    enum: ORDER_URGENCIES,
+    required: false,
+  })
   @IsOptional()
-  @IsString()
-  urgency?: string;
+  @IsIn(ORDER_URGENCIES)
+  urgency?: OrderUrgency;
 
-  @ApiProperty({ description: 'Campo para ordenação', example: 'title', required: false })
+  @ApiProperty({
+    description: 'Status do pedido',
+    enum: ORDER_STATUSES,
+    required: false,
+  })
+  @IsOptional()
+  @IsIn(ORDER_STATUSES)
+  status?: OrderStatus;
+
+  @ApiProperty({ description: 'Cliente do pedido', required: false })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  client_id?: number;
+
+  @ApiProperty({ description: 'Campo para ordenacao', example: 'title', required: false })
   @IsOptional()
   @IsString()
   sort_by?: string;
 
-  @ApiProperty({ description: 'Ordem de classificação', enum: ['ASC', 'DESC'], example: 'ASC', required: false })
+  @ApiProperty({
+    description: 'Ordem de classificacao',
+    enum: ['ASC', 'DESC'],
+    example: 'ASC',
+    required: false,
+  })
   @IsOptional()
-  @IsString()
+  @IsIn(['ASC', 'DESC'])
   order?: 'ASC' | 'DESC';
 }

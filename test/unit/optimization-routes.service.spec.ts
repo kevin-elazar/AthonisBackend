@@ -10,6 +10,7 @@ import { Vehicle } from '@/shared/entities/vehicle.entity';
 import { GeocodingService } from '@/optimization-routes/services/geocoding.service';
 import { OptimizedRoutesHistoryService } from '@/optimization-routes/services/optimized-routes-history.service';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
+import { CompanyService } from '@/modules/company/services/company.service';
 
 describe('OptimizationRoutesService', () => {
   let service: OptimizationRoutesService;
@@ -101,6 +102,9 @@ describe('OptimizationRoutesService', () => {
         {
           provide: GeocodingService,
           useValue: {
+            // Sem chave configurada: o servico cai para coordenadas simuladas
+            // e o resultado precisa se declarar como simulado.
+            isConfigured: jest.fn().mockReturnValue(false),
             geocodeMultipleAddresses: jest.fn().mockRejectedValue(new Error('Geocoding falhou')),
             getSimulatedCoordinates: jest.fn().mockReturnValue(mockCoordinates),
           },
@@ -109,6 +113,22 @@ describe('OptimizationRoutesService', () => {
           provide: OptimizedRoutesHistoryService,
           useValue: {
             create: jest.fn().mockResolvedValue({}),
+          },
+        },
+        {
+          provide: CompanyService,
+          useValue: {
+            // Empresa sem depósito cadastrado: a rota parte do ponto padrão
+            // e o resultado precisa sinalizar isso.
+            getRoutingSettings: jest.fn().mockResolvedValue({
+              depot: { latitude: -23.5505, longitude: -46.6333 },
+              depotAddress: null,
+              costPerKm: 1.0,
+              costPerHour: 50.0,
+              stopDurationMinutes: 30,
+              defaultVehicleCapacityKg: 1000,
+              usingFallbackDepot: true,
+            }),
           },
         },
         {
@@ -167,11 +187,36 @@ describe('OptimizationRoutesService', () => {
     });
   });
 
+  describe('elegibilidade sem cliente', () => {
+    it('considera roteirizável um pedido sem cliente (entrega avulsa)', async () => {
+      const avulso = { ...mockOrderValid, order_id: 50, client_id: null, client: null };
+      jest.spyOn(orderRepository, 'find').mockResolvedValue([avulso] as unknown as Order[]);
+
+      const validation = await service.validateOrders([50]);
+
+      // A rota é feita a partir do endereço; o cliente não é pré-requisito.
+      expect(validation.validOrders).toContain(50);
+      expect(validation.unassigned).toEqual([]);
+    });
+  });
+
   describe('optimizeRoutes', () => {
-    it('deve lançar HttpException quando há invalidOrders', async () => {
+    it('reporta pedido inexistente em unassignedOrders em vez de abortar tudo', async () => {
       jest.spyOn(orderRepository, 'find').mockResolvedValue([mockOrderValid] as Order[]);
 
-      await expect(service.optimizeRoutes([1, 999])).rejects.toThrow(HttpException);
+      const result = await service.optimizeRoutes([1, 999]);
+
+      // O pedido valido continua sendo roteirizado...
+      expect(result.routes.length).toBeGreaterThan(0);
+      // ...e o que ficou de fora aparece com o motivo, em vez de sumir.
+      expect(result.unassignedOrders).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            orderId: 999,
+            reason: 'Pedido não encontrado ou pertence a outra empresa',
+          }),
+        ]),
+      );
     });
 
     it('deve lançar HttpException quando validOrders vazio', async () => {
@@ -188,7 +233,11 @@ describe('OptimizationRoutesService', () => {
       const result = await service.optimizeRoutes([1]);
 
       expect(result).toHaveProperty('success', true);
-      expect(result).toHaveProperty('message', 'Rotas otimizadas com sucesso');
+      // Rota sem Google é simulada e precisa se identificar como tal.
+      expect(result).toHaveProperty('simulated', true);
+      expect(result).toHaveProperty('mode', 'simulated');
+      expect(result.message).toContain('SIMULADO');
+      expect(result.routes[0]).toHaveProperty('mode', 'simulated');
       expect(result).toHaveProperty('totalRoutes');
       expect(result).toHaveProperty('totalOrders', 1);
       expect(result).toHaveProperty('optimizationTime');

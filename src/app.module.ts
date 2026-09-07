@@ -10,6 +10,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { OrderImportsModule } from "./modules/order-imports/order-imports.module";
 import { OptimizationRoutesModule } from "./optimization-routes/optimization-routes.module";
 import { StreetViewModule } from "./modules/street-view/street-view.module";
+import { CompanyModule } from "./modules/company/company.module";
 
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { HttpExceptionFilter } from "./filters/http-exception.filter";
@@ -28,6 +29,7 @@ import { TenantInterceptor } from "./shared/tenant/tenant.interceptor";
     TypeOrmModule.forRoot(databaseConfig),
     TenantModule,
     AuthModule,
+    CompanyModule,
     ClientsModule,
     OrdersModule,
     OrderImportsModule,

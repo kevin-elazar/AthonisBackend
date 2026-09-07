@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { DriverStatus } from '../domain/enums';
 
 @Entity('driver')
 export class Driver {
@@ -19,6 +20,16 @@ export class Driver {
 
   @Column({ type: 'varchar', length: 14, nullable: true })
   document: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phone?: string;
+
+  /** Número da CNH. */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  cnh?: string;
+
+  @Column({ type: 'varchar', length: 20, default: 'available' })
+  status: DriverStatus;
 
   @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;

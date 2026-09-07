@@ -8,8 +8,10 @@ import {
   ParseIntPipe,
   HttpStatus,
   HttpCode,
-  UseGuards
+  Header,
+  Res
 } from '@nestjs/common';
+import type { Response as ExpressResponse } from 'express';
 import { 
   ApiTags, 
   ApiOperation, 
@@ -89,6 +91,30 @@ export class StreetViewController {
     @Body() body: StreetViewBatchRequestDto
   ): Promise<StreetViewResponseDto[]> {
     return await this.streetViewService.getStreetViewDataBatch(body.orderIds);
+  }
+
+  /**
+   * Serve a imagem do Street View pelo próprio backend.
+   * A chave da API do Google fica no servidor: o cliente recebe apenas bytes.
+   */
+  @Get('order/:orderId/image')
+  @Header('Cache-Control', 'private, max-age=86400')
+  @ApiOperation({
+    summary: 'Imagem do Street View do pedido',
+    description:
+      'Retorna a imagem do Street View do endereço de entrega. O backend consulta o Google server-side, de modo que a chave da API nunca é exposta ao navegador.',
+  })
+  @ApiParam({ name: 'orderId', description: 'ID do pedido', example: 1, type: Number })
+  @ApiResponse({ status: 200, description: 'Imagem JPEG do panorama' })
+  @ApiResponse({ status: 404, description: 'Pedido sem cobertura de Street View' })
+  @ApiResponse({ status: 502, description: 'Erro ao consultar a API do Google' })
+  async getStreetViewImage(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Res() res: ExpressResponse,
+  ): Promise<void> {
+    const { data, contentType } = await this.streetViewService.getStreetViewImage(orderId);
+    res.setHeader('Content-Type', contentType);
+    res.send(data);
   }
 
   /**

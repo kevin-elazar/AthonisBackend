@@ -1,6 +1,7 @@
 import { IsOptional, IsEmail, IsIn, IsDate } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { CLIENT_STATUSES, ClientStatus } from '../../../shared/domain/enums';
 
 export class FindClientDto {
   @ApiProperty({ description: 'Número da página', example: 1, required: false })
@@ -51,4 +52,9 @@ export class FindClientDto {
   @IsOptional()
   @IsIn(['ASC', 'DESC'], { message: 'Ordem deve ser ASC ou DESC' })
   order?: 'ASC' | 'DESC';
+
+  @ApiProperty({ description: 'Situacao do cliente', enum: CLIENT_STATUSES, required: false })
+  @IsOptional()
+  @IsIn(CLIENT_STATUSES)
+  status?: ClientStatus;
 }

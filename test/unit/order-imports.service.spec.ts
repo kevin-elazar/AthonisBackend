@@ -25,6 +25,13 @@ jest.mock('fs', () => {
 });
 
 describe('OrderImportsService', () => {
+
+  /** Conjuntos de referencias validas usados pelo novo validateReferences. */
+  const refs = () => ({
+    clientIds: new Set<number>([1]),
+    vehicleIds: new Set<number>([1]),
+    driverIds: new Set<number>([1]),
+  });
   let service: OrderImportsService;
   let clientRepository: Repository<Client>;
   let vehicleRepository: Repository<Vehicle>;
@@ -97,20 +104,17 @@ describe('OrderImportsService', () => {
 
   describe('validateReferences', () => {
     it('deve retornar isValid:true quando todas FKs existem', async () => {
-      const result = await service.validateReferences({
-        client_id: 1,
-        vehicle_id: 1,
-        driver_id: 1,
-      });
+      const result = service.validateReferences(
+        { client_id: 1, vehicle_id: 1, driver_id: 1 },
+        refs(),
+      );
 
       expect(result).toHaveProperty('isValid', true);
       expect(result).toHaveProperty('errors', []);
     });
 
     it('deve retornar erros quando client_id inválido', async () => {
-      jest.spyOn(clientRepository, 'findOne').mockResolvedValue(null);
-
-      const result = await service.validateReferences({ client_id: 999 });
+      const result = service.validateReferences({ client_id: 999 }, refs());
 
       expect(result).toHaveProperty('isValid', false);
       expect(result.errors).toContain(
@@ -119,12 +123,10 @@ describe('OrderImportsService', () => {
     });
 
     it('deve retornar erros quando vehicle_id inválido', async () => {
-      jest.spyOn(vehicleRepository, 'findOne').mockResolvedValue(null);
-
-      const result = await service.validateReferences({
-        client_id: 1,
-        vehicle_id: 999,
-      });
+      const result = service.validateReferences(
+        { client_id: 1, vehicle_id: 999 },
+        refs(),
+      );
 
       expect(result).toHaveProperty('isValid', false);
       expect(result.errors).toContain(
@@ -133,12 +135,10 @@ describe('OrderImportsService', () => {
     });
 
     it('deve retornar erros quando driver_id inválido', async () => {
-      jest.spyOn(driverRepository, 'findOne').mockResolvedValue(null);
-
-      const result = await service.validateReferences({
-        client_id: 1,
-        driver_id: 999,
-      });
+      const result = service.validateReferences(
+        { client_id: 1, driver_id: 999 },
+        refs(),
+      );
 
       expect(result).toHaveProperty('isValid', false);
       expect(result.errors).toContain(

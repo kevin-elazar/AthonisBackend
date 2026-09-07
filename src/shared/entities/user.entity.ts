@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { UserRole } from '../domain/enums';
 
 @Entity('user')
 export class User {
@@ -21,7 +22,7 @@ export class User {
   name: string;
 
   @Column({ type: 'varchar', length: 50, default: 'user' })
-  role: string; // 'admin', 'user', 'driver', etc.
+  role: UserRole;
 
   @Column({ type: 'int', default: 1000 })
   id_company: number; // Código da empresa (0-9999)

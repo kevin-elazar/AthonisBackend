@@ -10,7 +10,7 @@ export const registerDto = {
   email: 'usuario@exemplo.com',
   password: 'senha123',
   name: 'João Silva',
-  role: 'user',
+  role: 'user' as const,
 };
 
 export const invalidLoginDto = {

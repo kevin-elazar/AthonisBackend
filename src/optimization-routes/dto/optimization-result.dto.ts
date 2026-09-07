@@ -23,6 +23,19 @@ export class RouteStop {
   estimatedDuration: number;
 }
 
+export type OptimizationMode = 'google' | 'simulated';
+
+export class UnassignedOrderDto {
+  @ApiProperty({ description: 'ID do pedido não roteirizado', example: 12 })
+  orderId: number;
+
+  @ApiProperty({
+    description: 'Motivo pelo qual o pedido ficou de fora',
+    example: 'Pedido sem veículo e/ou motorista atribuído',
+  })
+  reason: string;
+}
+
 export class OptimizedRoute {
   @ApiProperty({ description: 'ID do veículo', example: 1 })
   vehicleId: number;
@@ -56,6 +69,14 @@ export class OptimizedRoute {
     latitude: number;
     longitude: number;
   };
+
+  @ApiProperty({
+    description:
+      'Origem dos dados da rota: "google" usa a Route Optimization API; "simulated" é uma estimativa local, sem valor operacional.',
+    enum: ['google', 'simulated'],
+    example: 'google',
+  })
+  mode: OptimizationMode;
 }
 
 export class OptimizationResultDto {
@@ -77,6 +98,31 @@ export class OptimizationResultDto {
   @ApiProperty({ description: 'Rotas otimizadas', type: [OptimizedRoute] })
   routes: OptimizedRoute[];
 
-  @ApiProperty({ description: 'IDs dos pedidos não atribuídos (opcional)', example: [], required: false })
-  unassignedOrders?: number[];
+  @ApiProperty({
+    description: 'Pedidos que ficaram de fora da roteirização, com o motivo de cada exclusão',
+    type: [UnassignedOrderDto],
+    required: false,
+  })
+  unassignedOrders?: UnassignedOrderDto[];
+
+  @ApiProperty({
+    description:
+      'Origem dos dados: "google" quando a Route Optimization API respondeu; "simulated" quando o resultado é uma estimativa local (sem valor operacional).',
+    enum: ['google', 'simulated'],
+    example: 'google',
+  })
+  mode: OptimizationMode;
+
+  @ApiProperty({
+    description: 'Verdadeiro quando ao menos uma rota veio de simulação, não da API do Google.',
+    example: false,
+  })
+  simulated: boolean;
+
+  @ApiProperty({
+    description:
+      'Verdadeiro quando a empresa não tem depósito cadastrado e as rotas partiram do ponto padrão.',
+    example: false,
+  })
+  usingFallbackDepot: boolean;
 }

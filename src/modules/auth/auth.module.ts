@@ -7,6 +7,7 @@ import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./strategies/jwt.strategy";
 import { User } from "../../shared/entities/user.entity";
 import { TenantModule } from "@/shared/tenant/tenant.module";
+import { config } from "../../config/env.config";
 
 @Module({
   imports: [
@@ -14,9 +15,9 @@ import { TenantModule } from "@/shared/tenant/tenant.module";
     TenantModule,
     PassportModule.register({ defaultStrategy: "jwt", session: false }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || "your-secret-key-change-in-production",
+      secret: config.jwt.secret,
       signOptions: {
-        expiresIn: "1h", // 1 hora de validade do token
+        expiresIn: config.jwt.expiresIn as any,
       },
     }),
   ],
