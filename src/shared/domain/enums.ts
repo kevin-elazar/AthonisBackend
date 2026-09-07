@@ -28,6 +28,14 @@ export type VehicleStatus = (typeof VEHICLE_STATUSES)[number];
 export const VEHICLE_TYPES = ['van', 'truck', 'motorcycle', 'utility'] as const;
 export type VehicleType = (typeof VEHICLE_TYPES)[number];
 
+/**
+ * Categorias de CNH que interessam a uma operacao de entrega.
+ * A habilita moto; B a E formam uma escala: quem tem E dirige o que B dirige.
+ * As combinacoes (AB..AE) somam a moto a uma das categorias de carga.
+ */
+export const CNH_CATEGORIES = ['A', 'B', 'C', 'D', 'E', 'AB', 'AC', 'AD', 'AE'] as const;
+export type CnhCategory = (typeof CNH_CATEGORIES)[number];
+
 export const CLIENT_STATUSES = ['active', 'inactive'] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 

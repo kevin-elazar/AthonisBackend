@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
-import { DriverStatus } from '../domain/enums';
+import { CnhCategory, DriverStatus } from '../domain/enums';
 
 @Entity('driver')
 export class Driver {
@@ -27,6 +27,17 @@ export class Driver {
   /** Número da CNH. */
   @Column({ type: 'varchar', length: 20, nullable: true })
   cnh?: string;
+
+  /**
+   * Categoria da CNH. E o que determina qual veiculo o motorista pode dirigir:
+   * escalar quem so tem B num caminhao e infracao, nao detalhe de cadastro.
+   */
+  @Column({ type: 'varchar', length: 2, nullable: true })
+  cnh_category?: CnhCategory;
+
+  /** Validade da CNH. Vencida, o motorista nao pode rodar. */
+  @Column({ type: 'date', nullable: true })
+  cnh_expiration?: Date;
 
   @Column({ type: 'varchar', length: 20, default: 'available' })
   status: DriverStatus;
