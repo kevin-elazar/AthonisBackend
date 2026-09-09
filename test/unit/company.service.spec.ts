@@ -5,10 +5,12 @@ import { NotFoundException } from '@nestjs/common';
 import { CompanyService } from '@/modules/company/services/company.service';
 import { Company } from '@/shared/entities/company.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
+import { AddressCoordinatesService } from '@/optimization-routes/services/address-coordinates.service';
 
 describe('CompanyService', () => {
   let service: CompanyService;
   let companyRepository: Repository<Company>;
+  let addressCoordinates: AddressCoordinatesService;
 
   const mockCompany = {
     id_company: 1000,
@@ -50,11 +52,22 @@ describe('CompanyService', () => {
             getUser: jest.fn().mockReturnValue({ email: 'admin@athonis.com' }),
           },
         },
+        {
+          // Sem geocoding configurado: o deposito fica sem coordenada, que e o
+          // comportamento esperado enquanto a chave nao esta ligada.
+          provide: AddressCoordinatesService,
+          useValue: {
+            keyFor: jest.fn().mockReturnValue('chave'),
+            storedIsFresh: jest.fn().mockReturnValue(true),
+            resolve: jest.fn().mockResolvedValue(null),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<CompanyService>(CompanyService);
     companyRepository = module.get<Repository<Company>>(getRepositoryToken(Company));
+    addressCoordinates = module.get<AddressCoordinatesService>(AddressCoordinatesService);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -124,6 +137,62 @@ describe('CompanyService', () => {
       expect(settings.usingFallbackDepot).toBe(true);
       expect(settings.costPerKm).toBe(1.0);
       expect(settings.depotAddress).toBeNull();
+    });
+  });
+
+  describe('coordenadas do depósito', () => {
+    it('resolve a partir do endereço quando ele muda', async () => {
+      jest.spyOn(addressCoordinates, 'storedIsFresh').mockReturnValue(false);
+      jest.spyOn(addressCoordinates, 'resolve').mockResolvedValue({
+        latitude: -26.4851,
+        longitude: -49.0669,
+        addressKey: 'chave-nova',
+        source: 'geocoding',
+      });
+
+      const salvo = await service.updateCurrent({ depot_city: 'Jaraguá do Sul' } as never);
+
+      expect(salvo.depot_latitude).toBe(-26.4851);
+      expect(salvo.depot_longitude).toBe(-49.0669);
+      expect(salvo.depot_geocoded_address).toBe('chave-nova');
+    });
+
+    it('não grava coordenada simulada no cadastro', async () => {
+      jest.spyOn(addressCoordinates, 'storedIsFresh').mockReturnValue(false);
+      jest.spyOn(addressCoordinates, 'resolve').mockResolvedValue({
+        latitude: -23.5505,
+        longitude: -46.6333,
+        addressKey: 'chave',
+        source: 'simulated',
+      });
+
+      const salvo = await service.updateCurrent({ depot_city: 'Santos' } as never);
+
+      // Coordenada inventada faria a rota partir de um ponto que não existe.
+      expect(salvo.depot_latitude).toBeNull();
+      expect(salvo.depot_geocoded_address).toBeNull();
+    });
+
+    it('respeita coordenadas informadas manualmente e não as sobrescreve', async () => {
+      jest.spyOn(addressCoordinates, 'storedIsFresh').mockReturnValue(false);
+
+      const salvo = await service.updateCurrent({
+        depot_latitude: -26.5,
+        depot_longitude: -49.1,
+      } as never);
+
+      expect(salvo.depot_latitude).toBe(-26.5);
+      expect(addressCoordinates.resolve).not.toHaveBeenCalled();
+      // A coordenada manual passa a valer para o endereço atual.
+      expect(salvo.depot_geocoded_address).toBe('chave');
+    });
+
+    it('não geocodifica de novo quando o endereço não mudou', async () => {
+      jest.spyOn(addressCoordinates, 'storedIsFresh').mockReturnValue(true);
+
+      await service.updateCurrent({ trade_name: 'Outro nome' } as never);
+
+      expect(addressCoordinates.resolve).not.toHaveBeenCalled();
     });
   });
 });

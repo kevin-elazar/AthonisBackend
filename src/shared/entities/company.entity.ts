@@ -81,6 +81,17 @@ export class Company {
   @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
   depot_longitude?: number;
 
+  /**
+   * Endereço normalizado que gerou as coordenadas acima.
+   *
+   * Guardar isto é o que impede a coordenada ficar para trás: se o endereço do
+   * depósito mudar, a chave deixa de bater e a coordenada é resolvida de novo.
+   * Sem isso já aconteceu de o endereço apontar para uma cidade e a coordenada
+   * para outra, a centenas de quilômetros, sem nada avisando.
+   */
+  @Column({ type: 'varchar', length: 400, nullable: true })
+  depot_geocoded_address?: string;
+
   // ------------------------------------------- Parâmetros de roteirização
 
   /** Custo por quilômetro rodado, usado na otimização. */
