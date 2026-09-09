@@ -36,6 +36,14 @@ export type VehicleType = (typeof VEHICLE_TYPES)[number];
 export const CNH_CATEGORIES = ['A', 'B', 'C', 'D', 'E', 'AB', 'AC', 'AD', 'AE'] as const;
 export type CnhCategory = (typeof CNH_CATEGORIES)[number];
 
+/**
+ * Ciclo de vida de uma rota.
+ * 'planned' nasce da otimizacao, 'active' e quando o motorista sai para a
+ * entrega e 'completed' quando volta. 'cancelled' devolve os pedidos.
+ */
+export const ROUTE_STATUSES = ['planned', 'active', 'completed', 'cancelled'] as const;
+export type RouteStatus = (typeof ROUTE_STATUSES)[number];
+
 export const CLIENT_STATUSES = ['active', 'inactive'] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 

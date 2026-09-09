@@ -1,6 +1,6 @@
 import { Injectable, HttpException, HttpStatus, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { Order } from '../../shared/entities/order.entity';
 import { Client } from '../../shared/entities/client.entity';
 import { Driver } from '../../shared/entities/driver.entity';
@@ -18,6 +18,7 @@ import { GoogleMapsRouteOptimization } from '../server';
 import { TenantContextService } from '../../shared/tenant/tenant-context.service';
 import { config } from '../../config/env.config';
 import { CompanyService, RoutingSettings } from '../../modules/company/services/company.service';
+import { Route } from '../../shared/entities/route.entity';
 
 type RoutableStop = { order: any; coordinates: GeocodingResult };
 
@@ -41,6 +42,7 @@ export class OptimizationRoutesService {
     private historyService: OptimizedRoutesHistoryService,
     private tenantContext: TenantContextService,
     private companyService: CompanyService,
+    private dataSource: DataSource,
   ) {
     const projectId = config.google.projectId;
     if (projectId) {
@@ -94,6 +96,9 @@ export class OptimizationRoutesService {
   async optimizeRoutes(orderIds: number[]): Promise<OptimizationResultDto> {
     const startTime = Date.now();
     let googleApiResponse: any = null;
+    // A execução já rendeu um registro de auditoria: um segundo registro, de
+    // falha, contaria a mesma tentativa duas vezes.
+    let historicoSalvo = false;
 
     try {
       this.logger.log(`Iniciando otimização para ${orderIds.length} pedidos`);
@@ -155,7 +160,7 @@ export class OptimizationRoutesService {
       };
 
       try {
-        await this.historyService.create({
+        const historico = await this.historyService.create({
           order_ids: routedOrderIds,
           total_routes: routes.length,
           total_orders: routedOrderIds.length,
@@ -170,30 +175,51 @@ export class OptimizationRoutesService {
             ? `Resultado SIMULADO (sem Google Route Optimization) com ${routes.length} rota(s).`
             : `Otimização realizada com ${routes.length} rota(s) criada(s).`,
         });
-      } catch (historyError) {
-        this.logger.error('Erro ao salvar histórico de otimização:', historyError);
+        historicoSalvo = true;
+
+        // A rota vira registro próprio aqui. O histórico é auditoria da
+        // chamada à API; é esta parte que a operação manipula depois.
+        await this.persistRoutes(routes, historico.id);
+      } catch (persistError) {
+        this.logger.error('Erro ao gravar as rotas geradas:', persistError);
+
+        // Sem rota gravada não há o que despachar: falhar é mais honesto do
+        // que devolver sucesso para uma otimização que não deixou rastro.
+        if (historicoSalvo) {
+          throw new HttpException(
+            {
+              success: false,
+              message:
+                'A otimização foi concluída, mas as rotas não puderam ser gravadas. Tente novamente.',
+            },
+            HttpStatus.INTERNAL_SERVER_ERROR,
+          );
+        }
+        this.logger.error('Erro ao salvar histórico de otimização:', persistError);
       }
 
       return result;
     } catch (error) {
       this.logger.error('Erro na otimização de rotas:', error);
 
-      try {
-        await this.historyService.create({
-          order_ids: orderIds,
-          total_routes: 0,
-          total_orders: orderIds.length,
-          optimization_time_ms: Date.now() - startTime,
-          google_api_response: JSON.stringify(googleApiResponse || {}),
-          optimization_result: JSON.stringify({
-            success: false,
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          }),
-          status: 'failed',
-          notes: `Falha na otimização: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-        });
-      } catch (historyError) {
-        this.logger.error('Erro ao salvar histórico de falha:', historyError);
+      if (!historicoSalvo) {
+        try {
+          await this.historyService.create({
+            order_ids: orderIds,
+            total_routes: 0,
+            total_orders: orderIds.length,
+            optimization_time_ms: Date.now() - startTime,
+            google_api_response: JSON.stringify(googleApiResponse || {}),
+            optimization_result: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Erro desconhecido',
+            }),
+            status: 'failed',
+            notes: `Falha na otimização: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+          });
+        } catch (historyError) {
+          this.logger.error('Erro ao salvar histórico de falha:', historyError);
+        }
       }
 
       if (error instanceof HttpException) {
@@ -239,6 +265,67 @@ export class OptimizationRoutesService {
   }
 
   /**
+   * Grava cada rota gerada como registro próprio e carimba os pedidos.
+   *
+   * É o que dá identidade à rota: sem isso ela existiria apenas como um
+   * pedaço do JSON do histórico, e não haveria como responder "em que rota
+   * está este pedido", iniciar a rota ou apagar uma sem apagar as irmãs.
+   */
+  private async persistRoutes(routes: OptimizedRoute[], historyId: number): Promise<void> {
+    if (routes.length === 0) return;
+
+    const idCompany = this.tenantContext.getIdCompany();
+    const autor = this.tenantContext.getUser()?.email ?? undefined;
+
+    // Tudo numa transação: uma rota gravada com metade dos pedidos carimbados
+    // deixaria o resto dos pedidos livres para entrar em outra rota.
+    await this.dataSource.transaction(async (manager) => {
+      for (const rota of routes) {
+        const orderIds = rota.stops.map((stop) => stop.orderId);
+        if (orderIds.length === 0) continue;
+
+        const pedidos = await manager.find(Order, {
+          where: { order_id: In(orderIds), id_company: idCompany },
+        });
+        const primeiro = pedidos.find((pedido) => pedido.order_id === orderIds[0]);
+
+        const salva = await manager.save(
+          manager.create(Route, {
+            id_company: idCompany,
+            history_id: historyId,
+            driver_id: rota.driverId ?? undefined,
+            vehicle_id: rota.vehicleId ?? undefined,
+            status: 'planned' as const,
+            planned_date: primeiro?.delivery_date,
+            total_distance_m: Math.round(rota.totalDistance ?? 0),
+            total_duration_min: Math.round(rota.totalDuration ?? 0),
+            simulated: rota.mode === 'simulated',
+            region: primeiro?.delivery_city,
+            created_by: autor,
+          }),
+        );
+
+        // A posição da parada vem da ordem devolvida pela otimização: é ela
+        // que diz em que sequência o motorista deve entregar.
+        for (const [indice, stop] of rota.stops.entries()) {
+          await manager.update(
+            Order,
+            { order_id: stop.orderId, id_company: idCompany },
+            {
+              route_id: salva.route_id,
+              stop_sequence: indice + 1,
+              status: 'planned',
+              delivery_latitude: stop.coordinates?.latitude,
+              delivery_longitude: stop.coordinates?.longitude,
+              updated_by: autor,
+            },
+          );
+        }
+      }
+    });
+  }
+
+  /**
    * Motivo pelo qual um pedido não pode entrar na roteirização, ou null se puder.
    *
    * Cliente não entra na lista: a rota é feita a partir do endereço, e uma
@@ -247,6 +334,11 @@ export class OptimizationRoutesService {
   private getIneligibilityReason(order: Order): string | null {
     if (!order.delivery_street || !order.delivery_city || !order.delivery_state) {
       return 'Endereço de entrega incompleto (rua, cidade e estado são obrigatórios)';
+    }
+    // Já está numa rota: roteirizar de novo criaria duas rotas disputando a
+    // mesma entrega, e a segunda sobrescreveria a primeira sem aviso.
+    if (order.route_id) {
+      return 'Pedido já faz parte de uma rota';
     }
     if (!order.vehicle_id && !order.driver_id) {
       return 'Pedido sem veículo e sem motorista atribuídos';

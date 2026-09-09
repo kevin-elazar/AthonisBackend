@@ -9,6 +9,7 @@ import { ClientsModule } from "./modules/clients/clients.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { OrderImportsModule } from "./modules/order-imports/order-imports.module";
 import { OptimizationRoutesModule } from "./optimization-routes/optimization-routes.module";
+import { RoutesModule } from "./modules/routes/routes.module";
 import { StreetViewModule } from "./modules/street-view/street-view.module";
 import { CompanyModule } from "./modules/company/company.module";
 
@@ -36,6 +37,7 @@ import { TenantInterceptor } from "./shared/tenant/tenant.interceptor";
     DriversModule,
     VehiclesModule,
     OptimizationRoutesModule,
+    RoutesModule,
     StreetViewModule,
   ],
   providers: [

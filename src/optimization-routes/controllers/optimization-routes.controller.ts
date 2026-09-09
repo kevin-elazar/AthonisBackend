@@ -87,7 +87,13 @@ export class OptimizationRoutesController {
         totalOrders: optimizeRoutesDto.orderIds.length,
         validOrders: validation.validOrders,
         invalidOrders: validation.invalidOrders,
-        canOptimize: validation.invalidOrders.length === 0
+        // O motivo de cada exclusão é o que a tela mostra para a pessoa
+        // entender por que o pedido não entra na rota. Antes era descartado.
+        unassigned: validation.unassigned,
+        // Sem nenhum pedido elegível não há o que otimizar. Antes isso olhava
+        // só os pedidos inexistentes, então dizia "pode otimizar" para uma
+        // seleção inteira de pedidos inelegíveis.
+        canOptimize: validation.validOrders.length > 0
       };
     } catch (error) {
       this.logger.error('Erro na validação de pedidos:', error);

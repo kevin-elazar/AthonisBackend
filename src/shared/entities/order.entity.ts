@@ -10,6 +10,7 @@ import { Client } from './client.entity';
 import { OrderStatus, OrderUrgency } from '../domain/enums';
 import { Driver } from './driver.entity';
 import { Vehicle } from './vehicle.entity';
+import { Route } from './route.entity';
 
 @Entity('order')
 export class Order {
@@ -60,9 +61,31 @@ export class Order {
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
   value?: number;
 
-  /** Histórico de otimização que roteirizou este pedido. */
+  /**
+   * Rota em que o pedido foi colocado. É por aqui que se responde "em que
+   * rota está este pedido" sem varrer o histórico de otimização.
+   */
   @Column({ type: 'int', nullable: true })
   route_id?: number;
+
+  @ManyToOne(() => Route, { nullable: true })
+  @JoinColumn({ name: 'route_id', referencedColumnName: 'route_id' })
+  route?: Route;
+
+  /** Posição da parada dentro da rota, a partir de 1. */
+  @Column({ type: 'int', nullable: true })
+  stop_sequence?: number;
+
+  /**
+   * Coordenadas do endereço de entrega, resolvidas na roteirização.
+   * Guardadas para que a rota (e o app do entregador) não precisem
+   * geocodificar de novo o mesmo endereço a cada consulta.
+   */
+  @Column({ type: 'float', nullable: true })
+  delivery_latitude?: number;
+
+  @Column({ type: 'float', nullable: true })
+  delivery_longitude?: number;
 
   /** Momento em que a entrega foi efetivamente concluída. */
   @Column({ type: 'datetime', nullable: true })

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { OptimizationRoutesService } from '@/optimization-routes/services/optimization-routes.service';
 import { Order } from '@/shared/entities/order.entity';
 import { Client } from '@/shared/entities/client.entity';
@@ -67,6 +67,13 @@ describe('OptimizationRoutesService', () => {
 
   const mockCoordinates = { latitude: -23.5505, longitude: -46.6333 };
 
+  const mockManager = {
+    find: jest.fn().mockResolvedValue([]),
+    create: jest.fn((_entity: unknown, dados: unknown) => dados),
+    save: jest.fn().mockResolvedValue({ route_id: 10 }),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
+  };
+
   beforeEach(async () => {
     delete process.env.GOOGLE_PROJECT_ID;
 
@@ -112,7 +119,17 @@ describe('OptimizationRoutesService', () => {
         {
           provide: OptimizedRoutesHistoryService,
           useValue: {
-            create: jest.fn().mockResolvedValue({}),
+            create: jest.fn().mockResolvedValue({ id: 1 }),
+          },
+        },
+        {
+          // A gravação das rotas roda em transação; aqui só precisamos que o
+          // callback execute com um manager que aceite as chamadas.
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) =>
+              cb(mockManager),
+            ),
           },
         },
         {

@@ -10,7 +10,7 @@
  *
  * Uso:
  *   node scripts/reset-data.js --confirmar
- *   node scripts/reset-data.js --confirmar --empresa=-1 --usuario=admin@athonis.com
+ *   node scripts/reset-data.js --confirmar --empresa=1 --usuario=admin@athonis.com
  *
  * Sem --confirmar o script apenas mostra o que seria apagado.
  */
@@ -25,7 +25,7 @@ const flag = (nome, padrao) => {
 };
 
 const CONFIRMAR = args.includes('--confirmar');
-const EMPRESA = Number(flag('empresa', process.env.RESET_COMPANY ?? '-1'));
+const EMPRESA = Number(flag('empresa', process.env.RESET_COMPANY ?? '1'));
 const USUARIO = flag('usuario', process.env.RESET_USER ?? 'admin@athonis.com');
 
 const DB_PATH = path.resolve(
@@ -37,6 +37,7 @@ const DB_PATH = path.resolve(
 /** Tabelas esvaziadas por completo, na ordem em que podem ser apagadas. */
 const TABELAS_OPERACIONAIS = [
   'order',
+  'route',
   'optimized_route_history',
   'street_view_cache',
   'client',
