@@ -19,6 +19,7 @@ import { TenantContextService } from '../../shared/tenant/tenant-context.service
 import { config } from '../../config/env.config';
 import { CompanyService, RoutingSettings } from '../../modules/company/services/company.service';
 import { Route } from '../../shared/entities/route.entity';
+import { AddressCoordinatesService } from './address-coordinates.service';
 
 type RoutableStop = { order: any; coordinates: GeocodingResult };
 
@@ -42,6 +43,7 @@ export class OptimizationRoutesService {
     private historyService: OptimizedRoutesHistoryService,
     private tenantContext: TenantContextService,
     private companyService: CompanyService,
+    private addressCoordinates: AddressCoordinatesService,
     private dataSource: DataSource,
   ) {
     const projectId = config.google.projectId;
@@ -308,6 +310,22 @@ export class OptimizationRoutesService {
         // A posição da parada vem da ordem devolvida pela otimização: é ela
         // que diz em que sequência o motorista deve entregar.
         for (const [indice, stop] of rota.stops.entries()) {
+          const pedido = pedidos.find((item) => item.order_id === stop.orderId);
+
+          // Guardamos junto o endereço que gerou a coordenada: se o endereço
+          // for editado depois, a chave deixa de bater e a coordenada é
+          // resolvida de novo em vez de continuar apontando para o lugar antigo.
+          const chave = pedido
+            ? this.addressCoordinates.keyFor({
+                street: pedido.delivery_street,
+                number: pedido.delivery_number,
+                district: pedido.delivery_district,
+                city: pedido.delivery_city,
+                state: pedido.delivery_state,
+                zipCode: pedido.delivery_zipcode,
+              })
+            : null;
+
           await manager.update(
             Order,
             { order_id: stop.orderId, id_company: idCompany },
@@ -317,6 +335,7 @@ export class OptimizationRoutesService {
               status: 'planned',
               delivery_latitude: stop.coordinates?.latitude,
               delivery_longitude: stop.coordinates?.longitude,
+              delivery_geocoded_address: chave ?? undefined,
               updated_by: autor,
             },
           );
@@ -414,6 +433,80 @@ export class OptimizationRoutesService {
     return { routes, apiResponses };
   }
 
+  /**
+   * Coordenada do pedido, na ordem do mais barato para o mais caro.
+   *
+   * Antes cada roteirização geocodificava todos os endereços de novo, então o
+   * custo era "pedidos × execuções". Aqui só chega ao geocoding o endereço
+   * que ninguém resolveu ainda.
+   */
+  private async resolveOrderCoordinates(order: any): Promise<GeocodingResult | null> {
+    const parts = {
+      street: order.delivery_street,
+      number: order.delivery_number,
+      district: order.delivery_district,
+      city: order.delivery_city,
+      state: order.delivery_state,
+      zipCode: order.delivery_zipcode,
+    };
+    const key = this.addressCoordinates.keyFor(parts);
+    const linha = this.formatAddress(order);
+
+    // 1. Já resolvido antes, e o endereço do pedido não mudou desde então.
+    if (
+      this.addressCoordinates.storedIsFresh(
+        order.delivery_geocoded_address,
+        order.delivery_latitude,
+        order.delivery_longitude,
+        key,
+      )
+    ) {
+      return {
+        latitude: Number(order.delivery_latitude),
+        longitude: Number(order.delivery_longitude),
+        formattedAddress: linha,
+      };
+    }
+
+    // 2. O pedido entrega no endereço cadastrado do cliente: a coordenada é a
+    //    mesma, e este é o caso mais comum da operação.
+    const client = order.client;
+    if (client && key) {
+      const clientKey = this.addressCoordinates.keyFor({
+        street: client.street,
+        number: client.number,
+        district: client.neighborhood,
+        city: client.city,
+        state: client.state,
+        zipCode: client.zip_code,
+      });
+
+      if (
+        clientKey === key &&
+        client.latitude !== null &&
+        client.latitude !== undefined &&
+        client.longitude !== null &&
+        client.longitude !== undefined
+      ) {
+        return {
+          latitude: Number(client.latitude),
+          longitude: Number(client.longitude),
+          formattedAddress: linha,
+        };
+      }
+    }
+
+    // 3. e 4. Cache de endereços e, só em último caso, o geocoding.
+    const resolvido = await this.addressCoordinates.resolve(parts, order.delivery_city);
+    if (!resolvido) return null;
+
+    return {
+      latitude: resolvido.latitude,
+      longitude: resolvido.longitude,
+      formattedAddress: linha,
+    };
+  }
+
   private async buildRouteForGroup(
     orders: any[],
     unassignedOrders: UnassignedOrderDto[],
@@ -425,15 +518,10 @@ export class OptimizationRoutesService {
     // O array de coordenadas mantém a MESMA posição do array de pedidos: um
     // endereço que falha vem como null e o pedido correspondente sai da rota,
     // em vez de herdar a coordenada do pedido seguinte.
-    let coordinates: (GeocodingResult | null)[];
+    const coordinates: (GeocodingResult | null)[] = [];
 
-    if (geocodingAvailable) {
-      coordinates = await this.geocodingService.geocodeMultipleAddresses(addresses);
-    } else {
-      this.logger.warn('Geocoding não configurado: usando coordenadas simuladas.');
-      coordinates = orders.map((order, index) =>
-        this.geocodingService.getSimulatedCoordinates(order.delivery_city, addresses[index]),
-      );
+    for (const order of orders) {
+      coordinates.push(await this.resolveOrderCoordinates(order));
     }
 
     const routable: RoutableStop[] = [];

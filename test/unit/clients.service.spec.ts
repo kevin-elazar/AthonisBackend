@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { ClientsService } from '@/modules/clients/services/clients.service';
 import { Client } from '@/shared/entities/client.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
+import { AddressCoordinatesService } from '@/optimization-routes/services/address-coordinates.service';
 import { createClientDto } from '../fixtures/client.fixtures';
 
 
@@ -65,6 +66,16 @@ describe('ClientsService', () => {
           useValue: {
             getIdCompany: jest.fn().mockReturnValue(1000),
             getUser: jest.fn().mockReturnValue({ email: 'admin@athonis.com' }),
+          },
+        },
+        {
+          // Sem geocoding configurado: o cadastro salva sem coordenada, que e
+          // o comportamento esperado quando a chave nao esta ligada.
+          provide: AddressCoordinatesService,
+          useValue: {
+            keyFor: jest.fn().mockReturnValue('chave'),
+            storedIsFresh: jest.fn().mockReturnValue(false),
+            resolve: jest.fn().mockResolvedValue(null),
           },
         },
       ],

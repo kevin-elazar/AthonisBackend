@@ -10,6 +10,8 @@ import { Client } from '../shared/entities/client.entity';
 import { Driver } from '../shared/entities/driver.entity';
 import { Vehicle } from '../shared/entities/vehicle.entity';
 import { OptimizedRouteHistory } from '../shared/entities/optimized-route-history.entity';
+import { GeocodeCache } from '../shared/entities/geocode-cache.entity';
+import { AddressCoordinatesService } from './services/address-coordinates.service';
 import { CompanyModule } from '../modules/company/company.module';
 
 @Module({
@@ -19,7 +21,8 @@ import { CompanyModule } from '../modules/company/company.module';
       Client, 
       Driver, 
       Vehicle,
-      OptimizedRouteHistory
+      OptimizedRouteHistory,
+      GeocodeCache
     ]),
     // Depósito, custos e tempo de parada vêm do cadastro da empresa.
     CompanyModule
@@ -31,12 +34,14 @@ import { CompanyModule } from '../modules/company/company.module';
   providers: [
     OptimizationRoutesService,
     OptimizedRoutesHistoryService,
-    GeocodingService
+    GeocodingService,
+    AddressCoordinatesService
   ],
   exports: [
     OptimizationRoutesService,
     OptimizedRoutesHistoryService,
-    GeocodingService
+    GeocodingService,
+    AddressCoordinatesService
   ]
 })
 export class OptimizationRoutesModule {}

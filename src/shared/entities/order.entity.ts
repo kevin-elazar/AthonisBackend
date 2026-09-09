@@ -87,6 +87,10 @@ export class Order {
   @Column({ type: 'float', nullable: true })
   delivery_longitude?: number;
 
+  /** Endereço normalizado que gerou as coordenadas de entrega. */
+  @Column({ type: 'varchar', length: 400, nullable: true })
+  delivery_geocoded_address?: string;
+
   /** Momento em que a entrega foi efetivamente concluída. */
   @Column({ type: 'datetime', nullable: true })
   delivered_at?: Date;

@@ -34,7 +34,12 @@ const DB_PATH = path.resolve(
   (process.env.DB_NAME ?? './src/database/database.sqlite').replace(/^\.\//, ''),
 );
 
-/** Tabelas esvaziadas por completo, na ordem em que podem ser apagadas. */
+/**
+ * Tabelas esvaziadas por completo, na ordem em que podem ser apagadas.
+ *
+ * `geocode_cache` fica de fora de propósito: são coordenadas de endereços,
+ * não dados da operação. Apagar faria pagar de novo pelos mesmos endereços.
+ */
 const TABELAS_OPERACIONAIS = [
   'order',
   'route',

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
@@ -11,13 +12,17 @@ import { CreateClientDto } from "../dto/create-client.dto";
 import { UpdateClientDto } from "../dto/update-client.dto";
 import { FindClientDto } from "../dto/find-client.dto";
 import { TenantContextService } from "../../../shared/tenant/tenant-context.service";
+import { AddressCoordinatesService } from "../../../optimization-routes/services/address-coordinates.service";
 
 @Injectable()
 export class ClientsService {
+  private readonly logger = new Logger(ClientsService.name);
+
   constructor(
     @InjectRepository(Client)
     private clientRepository: Repository<Client>,
     private tenantContext: TenantContextService,
+    private addressCoordinates: AddressCoordinatesService,
   ) {}
 
   async create(createClientDto: CreateClientDto) {
@@ -30,7 +35,64 @@ export class ClientsService {
       id_company: idCompany,
       created_by: createdBy,
     });
+    await this.resolveCoordinates(client);
     return await this.clientRepository.save(client);
+  }
+
+  /**
+   * Resolve as coordenadas do endereço do cliente.
+   *
+   * O endereço do cliente é o mais reaproveitado da operação: a maioria dos
+   * pedidos entrega nele. Resolver aqui, uma vez, evita geocodificar o mesmo
+   * lugar a cada roteirização.
+   *
+   * Falhar aqui não impede salvar o cliente: cadastro é o que importa, e a
+   * coordenada é resolvida de novo na primeira roteirização.
+   */
+  private async resolveCoordinates(client: Client): Promise<void> {
+    const parts = {
+      street: client.street,
+      number: client.number,
+      district: client.neighborhood,
+      city: client.city,
+      state: client.state,
+      zipCode: client.zip_code,
+    };
+
+    const chave = this.addressCoordinates.keyFor(parts);
+
+    // Endereço inalterado desde a última vez: nada a fazer.
+    if (
+      this.addressCoordinates.storedIsFresh(
+        client.geocoded_address,
+        client.latitude,
+        client.longitude,
+        chave,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const resolvido = await this.addressCoordinates.resolve(parts, client.city);
+
+      // Coordenada simulada não é gravada: ela viraria um dado falso no
+      // cadastro, e é indistinguível de uma real depois de salva.
+      if (!resolvido || resolvido.source === 'simulated') {
+        client.latitude = null;
+        client.longitude = null;
+        client.geocoded_address = null;
+        return;
+      }
+
+      client.latitude = resolvido.latitude;
+      client.longitude = resolvido.longitude;
+      client.geocoded_address = resolvido.addressKey;
+    } catch (erro) {
+      this.logger.warn(
+        `Não foi possível resolver as coordenadas do cliente: ${erro instanceof Error ? erro.message : erro}`,
+      );
+    }
   }
 
   async findAll(query: FindClientDto) {
@@ -163,6 +225,7 @@ export class ClientsService {
     const updatedBy = user?.email ?? undefined;
 
     Object.assign(client, { ...updateClientDto, updated_by: updatedBy });
+    await this.resolveCoordinates(client);
     return await this.clientRepository.save(client);
   }
 

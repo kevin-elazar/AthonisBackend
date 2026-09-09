@@ -8,6 +8,7 @@ import { Client } from '@/shared/entities/client.entity';
 import { Driver } from '@/shared/entities/driver.entity';
 import { Vehicle } from '@/shared/entities/vehicle.entity';
 import { GeocodingService } from '@/optimization-routes/services/geocoding.service';
+import { AddressCoordinatesService } from '@/optimization-routes/services/address-coordinates.service';
 import { OptimizedRoutesHistoryService } from '@/optimization-routes/services/optimized-routes-history.service';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
 import { CompanyService } from '@/modules/company/services/company.service';
@@ -123,7 +124,22 @@ describe('OptimizationRoutesService', () => {
           },
         },
         {
-          // A gravação das rotas roda em transação; aqui só precisamos que o
+          // Sem cache nem chave: cai na coordenada simulada, que e o cenario
+          // destes testes.
+          provide: AddressCoordinatesService,
+          useValue: {
+            keyFor: jest.fn(() => 'chave'),
+            storedIsFresh: jest.fn().mockReturnValue(false),
+            resolve: jest.fn().mockResolvedValue({
+              latitude: mockCoordinates.latitude,
+              longitude: mockCoordinates.longitude,
+              addressKey: 'chave',
+              source: 'simulated',
+            }),
+          },
+        },
+        {
+          // A gravacao das rotas roda em transacao; aqui so precisamos que o
           // callback execute com um manager que aceite as chamadas.
           provide: DataSource,
           useValue: {
