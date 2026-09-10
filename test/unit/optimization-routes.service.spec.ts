@@ -284,4 +284,142 @@ describe('OptimizationRoutesService', () => {
       expect(historyService.create).toHaveBeenCalled();
     });
   });
+
+  /**
+   * Estes testes chamam o método privado diretamente porque é a única forma
+   * de inspecionar o payload que vai para o Google sem subir o SDK inteiro —
+   * e os testes acima nunca exercitam este caminho: todos rodam sem
+   * GOOGLE_PROJECT_ID, então caem sempre na simulação.
+   */
+  describe('janela de entrega no modelo enviado ao Google', () => {
+    const settings = {
+      depot: { latitude: -23.5505, longitude: -46.6333 },
+      depotAddress: 'Depósito',
+      costPerKm: 1,
+      costPerHour: 50,
+      stopDurationMinutes: 30,
+      defaultVehicleCapacityKg: 1000,
+      usingFallbackDepot: false,
+      timezone: 'America/Sao_Paulo',
+      operationStartTime: '08:00',
+      operationEndTime: '18:00',
+    };
+
+    const stopCom = (overrides: Record<string, unknown>) => ({
+      order: { quantity: 1, ...overrides },
+      coordinates: { latitude: -23.56, longitude: -46.65 },
+    });
+
+    it('converte a janela do pedido para timestamps UTC', () => {
+      const routable = [
+        stopCom({ delivery_date: '2026-09-15', delivery_window: '08:00 - 12:00' }),
+      ];
+
+      const modelo = (service as any).buildOptimizationModel(routable, settings);
+      const janela = modelo.shipments[0].deliveries[0].timeWindows[0];
+
+      // 08:00 e 12:00 em Brasília (UTC-3) viram 11:00 e 15:00 em UTC.
+      expect(janela.startTime.seconds).toBe(Date.parse('2026-09-15T11:00:00.000Z') / 1000);
+      expect(janela.endTime.seconds).toBe(Date.parse('2026-09-15T15:00:00.000Z') / 1000);
+    });
+
+    it('não impõe janela quando o pedido é "dia todo"', () => {
+      const routable = [stopCom({ delivery_date: '2026-09-15', delivery_window: '' })];
+
+      const modelo = (service as any).buildOptimizationModel(routable, settings);
+
+      expect(modelo.shipments[0].deliveries[0].timeWindows).toBeUndefined();
+    });
+
+    it('não impõe janela quando o pedido não tem data de entrega', () => {
+      // Sem data não há como converter "08:00 - 12:00" para um instante: a
+      // hora sozinha não diz em relação a que dia.
+      const routable = [stopCom({ delivery_window: '08:00 - 12:00' })];
+
+      const modelo = (service as any).buildOptimizationModel(routable, settings);
+
+      expect(modelo.shipments[0].deliveries[0].timeWindows).toBeUndefined();
+    });
+
+    it('define o início e o fim globais a partir do expediente da empresa', () => {
+      const routable = [stopCom({ delivery_date: '2026-09-15' })];
+
+      const modelo = (service as any).buildOptimizationModel(routable, settings);
+
+      expect(modelo.globalStartTime.seconds).toBe(Date.parse('2026-09-15T11:00:00.000Z') / 1000);
+      expect(modelo.globalEndTime.seconds).toBe(Date.parse('2026-09-15T21:00:00.000Z') / 1000);
+    });
+
+    it('cobre do primeiro ao último dia quando o grupo tem datas diferentes', () => {
+      const routable = [
+        stopCom({ delivery_date: '2026-09-16' }),
+        stopCom({ delivery_date: '2026-09-15' }),
+      ];
+
+      const modelo = (service as any).buildOptimizationModel(routable, settings);
+
+      expect(modelo.globalStartTime.seconds).toBe(Date.parse('2026-09-15T11:00:00.000Z') / 1000);
+      expect(modelo.globalEndTime.seconds).toBe(Date.parse('2026-09-16T21:00:00.000Z') / 1000);
+    });
+  });
+
+  describe('horário de chegada devolvido pelo Google', () => {
+    const settings = {
+      depot: { latitude: -23.5505, longitude: -46.6333 },
+      depotAddress: 'Depósito',
+      costPerKm: 1,
+      costPerHour: 50,
+      stopDurationMinutes: 30,
+      defaultVehicleCapacityKg: 1000,
+      usingFallbackDepot: false,
+      timezone: 'America/Sao_Paulo',
+      operationStartTime: '08:00',
+      operationEndTime: '18:00',
+    };
+
+    const routable = [
+      { order: mockOrderValid, coordinates: { latitude: -23.56, longitude: -46.65 } },
+    ];
+
+    it('lê o startTime como instante absoluto, não como segundos a partir de agora', () => {
+      // `seconds` é epoch: 2026-09-15T11:00:00Z. Somar isso a `now()` — como o
+      // código fazia antes — jogaria a chegada para o ano de 2083.
+      const segundosEpoch = Date.parse('2026-09-15T11:00:00.000Z') / 1000;
+      const respostaGoogle = [
+        {
+          routes: [
+            {
+              visits: [{ shipmentIndex: 0, isPickup: false, startTime: { seconds: segundosEpoch } }],
+              metrics: { travelDistanceMeters: 5000, totalDuration: { seconds: 600 } },
+            },
+          ],
+        },
+      ];
+
+      const rota = (service as any).processGoogleMapsResponse(respostaGoogle, routable, settings);
+
+      expect(rota.stops[0].estimatedArrivalTime).toBe('2026-09-15T11:00:00.000Z');
+    });
+
+    it('usa a estimativa local quando o Google não devolve startTime', () => {
+      const respostaGoogle = [
+        {
+          routes: [
+            {
+              visits: [{ shipmentIndex: 0, isPickup: false }],
+              metrics: { travelDistanceMeters: 5000, totalDuration: { seconds: 600 } },
+            },
+          ],
+        },
+      ];
+
+      const antes = Date.now();
+      const rota = (service as any).processGoogleMapsResponse(respostaGoogle, routable, settings);
+      const chegada = new Date(rota.stops[0].estimatedArrivalTime).getTime();
+
+      // Perto de agora, não décadas de distância — é a estimativa local, não
+      // um instante do Google mal interpretado.
+      expect(chegada - antes).toBeLessThan(24 * 60 * 60 * 1000);
+    });
+  });
 });

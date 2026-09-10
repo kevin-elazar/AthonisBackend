@@ -16,6 +16,11 @@ export type RoutingSettings = {
   defaultVehicleCapacityKg: number;
   /** true quando a empresa não tem depósito cadastrado e caímos no padrão. */
   usingFallbackDepot: boolean;
+  /** Fuso da empresa — converte a janela de entrega e o expediente para UTC. */
+  timezone: string;
+  /** Expediente padrão, usado quando o pedido não tem janela própria. */
+  operationStartTime: string;
+  operationEndTime: string;
 };
 
 /**
@@ -177,6 +182,9 @@ export class CompanyService {
       stopDurationMinutes: Number(company?.stop_duration_minutes ?? 30),
       defaultVehicleCapacityKg: Number(company?.default_vehicle_capacity_kg ?? 1000),
       usingFallbackDepot: !hasDepot,
+      timezone: company?.timezone || 'America/Sao_Paulo',
+      operationStartTime: company?.operation_start_time || '08:00',
+      operationEndTime: company?.operation_end_time || '18:00',
     };
   }
 

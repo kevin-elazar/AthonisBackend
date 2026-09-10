@@ -20,6 +20,7 @@ import { config } from '../../config/env.config';
 import { CompanyService, RoutingSettings } from '../../modules/company/services/company.service';
 import { Route } from '../../shared/entities/route.entity';
 import { AddressCoordinatesService } from './address-coordinates.service';
+import { parseWindowText, zonedTimeToUtc } from '../../shared/domain/timezone';
 
 type RoutableStop = { order: any; coordinates: GeocodingResult };
 
@@ -568,7 +569,11 @@ export class OptimizationRoutesService {
     const vehicleCapacity =
       Number(routable[0]?.order?.vehicle?.capacity_kg) || settings.defaultVehicleCapacityKg;
 
+    const { globalStartTime, globalEndTime } = this.buildGlobalTimeWindow(routable, settings);
+
     return {
+      globalStartTime,
+      globalEndTime,
       vehicles: [
         {
           startLocation: settings.depot,
@@ -594,12 +599,64 @@ export class OptimizationRoutesService {
               longitude: stop.coordinates.longitude,
             },
             duration: { seconds: settings.stopDurationMinutes * 60 },
+            timeWindows: this.buildDeliveryTimeWindows(stop.order, settings),
           },
         ],
         loadDemands: {
           weight: { amount: stop.order.quantity || 1 },
         },
       })),
+    };
+  }
+
+  /**
+   * Janela de entrega do pedido, convertida para UTC.
+   *
+   * Sem isso o campo "08:00 - 12:00" era só um texto exibido em tela: o
+   * otimizador não sabia que a entrega tinha hora marcada e podia sequenciar
+   * a parada para qualquer momento do dia, inclusive fora da janela combinada
+   * com o cliente.
+   *
+   * Sem janela própria, a entrega vale para o expediente inteiro — não impomos
+   * restrição nenhuma além da que já existe no início/fim global do modelo.
+   */
+  private buildDeliveryTimeWindows(order: any, settings: RoutingSettings) {
+    const janela = parseWindowText(order.delivery_window);
+    if (!janela || !order.delivery_date) return undefined;
+
+    const inicio = zonedTimeToUtc(order.delivery_date, janela.inicio, settings.timezone);
+    const fim = zonedTimeToUtc(order.delivery_date, janela.fim, settings.timezone);
+
+    return [
+      {
+        startTime: { seconds: Math.floor(inicio.getTime() / 1000) },
+        endTime: { seconds: Math.floor(fim.getTime() / 1000) },
+      },
+    ];
+  }
+
+  /**
+   * Início e fim do expediente, em UTC, cobrindo todos os dias de entrega do
+   * grupo. A Route Optimization exige um intervalo global mesmo quando os
+   * pedidos não têm janela própria — sem ele, o modelo assume "agora" como
+   * início, e a rota planejada para semana que vem sairia com horários de
+   * hoje.
+   */
+  private buildGlobalTimeWindow(routable: RoutableStop[], settings: RoutingSettings) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const datas = routable
+      .map((stop) => stop.order.delivery_date)
+      .filter((data): data is string => !!data);
+
+    const primeiraData = datas.length > 0 ? datas.reduce((a, b) => (a < b ? a : b)) : hoje;
+    const ultimaData = datas.length > 0 ? datas.reduce((a, b) => (a > b ? a : b)) : hoje;
+
+    const inicio = zonedTimeToUtc(primeiraData, settings.operationStartTime, settings.timezone);
+    const fim = zonedTimeToUtc(ultimaData, settings.operationEndTime, settings.timezone);
+
+    return {
+      globalStartTime: { seconds: Math.floor(inicio.getTime() / 1000) },
+      globalEndTime: { seconds: Math.floor(fim.getTime() / 1000) },
     };
   }
 
@@ -630,14 +687,20 @@ export class OptimizationRoutesService {
           return null;
         }
 
+        // `visit.startTime` é um instante absoluto (epoch), não uma duração a
+        // partir de agora. Somar `now() + segundos` — como este código fazia —
+        // jogava a chegada décadas no futuro: os segundos aqui já passam de
+        // 1,7 bilhão. O bug ficava escondido enquanto o modelo não tinha
+        // globalStartTime/globalEndTime, porque nesse caso o Google nem
+        // preenchia este campo e o cálculo caía no fallback local abaixo.
         let estimatedArrivalTime = this.calculateEstimatedTime(
           index,
           settings.stopDurationMinutes,
         );
-        if (visit.startTime && visit.startTime.seconds) {
-          const startDate = new Date();
-          startDate.setSeconds(startDate.getSeconds() + parseInt(visit.startTime.seconds));
-          estimatedArrivalTime = startDate.toISOString();
+        if (visit.startTime && visit.startTime.seconds !== undefined) {
+          estimatedArrivalTime = new Date(
+            Number(visit.startTime.seconds) * 1000,
+          ).toISOString();
         }
 
         return {
