@@ -35,11 +35,12 @@ export class DriversService {
         limit = 10, 
         name, 
         document,
+        status,
         sort_by = 'name',
         order = 'ASC' 
       } = query;
   
-      const where = this.buildSearchConditions({ name, document });
+      const where = this.buildSearchConditions({ name, document, status });
       where.id_company = this.tenantContext.getIdCompany();
   
       const allowedFields = ['name', 'document', 'birth_date'];
@@ -51,12 +52,13 @@ export class DriversService {
         where,
         order: { [sort_by]: order },
         skip: (page - 1) * limit,
-        take: limit,
-        cache: true
+        take: limit
       });
   
+      const withMetrics = await this.attachDeliveryMetrics(items);
+
       return {
-        items,
+        items: withMetrics,
         meta: {
           total,
           page: Number(page),
@@ -72,8 +74,58 @@ export class DriversService {
     }
   }
 
-  private buildSearchConditions({ name, document }: Partial<FindDriverDto>) {
+  /**
+   * Entregas concluidas e taxa de sucesso por motorista, em uma unica
+   * consulta agregada — evita uma query por linha da listagem.
+   */
+  private async attachDeliveryMetrics(drivers: Driver[]) {
+    if (drivers.length === 0) return drivers;
+
+    const idCompany = this.tenantContext.getIdCompany();
+    const driverIds = drivers.map((driver) => driver.driver_id);
+
+    const rows = await this.driverRepository.manager
+      .createQueryBuilder()
+      .select("o.driver_id", "driver_id")
+      .addSelect("COUNT(o.order_id)", "total")
+      .addSelect(
+        "SUM(CASE WHEN o.status = 'delivered' THEN 1 ELSE 0 END)",
+        "delivered",
+      )
+      .from("order", "o")
+      .where("o.driver_id IN (:...driverIds)", { driverIds })
+      .andWhere("o.id_company = :idCompany", { idCompany })
+      .groupBy("o.driver_id")
+      .getRawMany();
+
+    const metrics = new Map<number, { total: number; delivered: number }>();
+    for (const row of rows) {
+      metrics.set(Number(row.driver_id), {
+        total: Number(row.total) || 0,
+        delivered: Number(row.delivered) || 0,
+      });
+    }
+
+    return drivers.map((driver) => {
+      const entry = metrics.get(driver.driver_id);
+      const total = entry?.total ?? 0;
+      const delivered = entry?.delivered ?? 0;
+
+      return {
+        ...driver,
+        delivery_count: delivered,
+        // Percentual de pedidos atribuidos que foram efetivamente entregues.
+        performance: total > 0 ? Math.round((delivered / total) * 100) : 0,
+      };
+    });
+  }
+
+  private buildSearchConditions({ name, document, status }: Partial<FindDriverDto>) {
     const where: FindOptionsWhere<Driver> = {};
+
+    if (status) {
+      where.status = status;
+    }
 
     if (name) {
       where.name = Like(`%${name.trim()}%`);

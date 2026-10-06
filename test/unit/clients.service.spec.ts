@@ -5,7 +5,23 @@ import { Repository } from 'typeorm';
 import { ClientsService } from '@/modules/clients/services/clients.service';
 import { Client } from '@/shared/entities/client.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
+import { AddressCoordinatesService } from '@/optimization-routes/services/address-coordinates.service';
 import { createClientDto } from '../fixtures/client.fixtures';
+
+
+/** Query builder encadeavel para as consultas agregadas (pedidos por cliente/motorista). */
+const createAggregateQueryBuilderMock = (rows: any[] = []) => {
+  const qb: any = {
+    select: jest.fn(() => qb),
+    addSelect: jest.fn(() => qb),
+    from: jest.fn(() => qb),
+    where: jest.fn(() => qb),
+    andWhere: jest.fn(() => qb),
+    groupBy: jest.fn(() => qb),
+    getRawMany: jest.fn().mockResolvedValue(rows),
+  };
+  return qb;
+};
 
 describe('ClientsService', () => {
   let service: ClientsService;
@@ -40,6 +56,9 @@ describe('ClientsService', () => {
             findOne: jest.fn(),
             findAndCount: jest.fn().mockResolvedValue([[mockClient], 1]),
             remove: jest.fn(),
+            manager: {
+              createQueryBuilder: jest.fn(() => createAggregateQueryBuilderMock()),
+            },
           },
         },
         {
@@ -47,6 +66,16 @@ describe('ClientsService', () => {
           useValue: {
             getIdCompany: jest.fn().mockReturnValue(1000),
             getUser: jest.fn().mockReturnValue({ email: 'admin@athonis.com' }),
+          },
+        },
+        {
+          // Sem geocoding configurado: o cadastro salva sem coordenada, que e
+          // o comportamento esperado quando a chave nao esta ligada.
+          provide: AddressCoordinatesService,
+          useValue: {
+            keyFor: jest.fn().mockReturnValue('chave'),
+            storedIsFresh: jest.fn().mockReturnValue(false),
+            resolve: jest.fn().mockResolvedValue(null),
           },
         },
       ],
@@ -116,6 +145,18 @@ describe('ClientsService', () => {
       expect(result.meta).toHaveProperty('total');
       expect(result.meta).toHaveProperty('page');
       expect(result.meta).toHaveProperty('limit');
+    });
+
+    it('anexa total de pedidos e data do último pedido a cada cliente', async () => {
+      const qb = createAggregateQueryBuilderMock([
+        { client_id: 1, order_count: '3', last_order_date: '2026-09-01 10:00:00' },
+      ]);
+      (clientRepository as any).manager.createQueryBuilder = jest.fn(() => qb);
+
+      const result = await service.findAll({});
+
+      expect(result.items[0]).toHaveProperty('order_count', 3);
+      expect(result.items[0]).toHaveProperty('last_order_date', '2026-09-01 10:00:00');
     });
   });
 });

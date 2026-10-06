@@ -6,6 +6,7 @@ import { StreetViewCache } from '../../../shared/entities/street-view-cache.enti
 import { Order } from '../../../shared/entities/order.entity';
 import { StreetViewResponseDto } from '../dto/street-view-response.dto';
 import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
+import { config } from '../../../config/env.config';
 
 interface StreetViewMetadataResponse {
   status: string;
@@ -32,8 +33,8 @@ export class StreetViewService {
     private orderRepository: Repository<Order>,
     private tenantContext: TenantContextService,
   ) {
-    // Reutiliza a mesma chave do Geocoding
-    this.apiKey = process.env.GOOGLE_GEOCODING_API_KEY;
+    // Reutiliza a mesma chave do Geocoding — server-side apenas.
+    this.apiKey = config.google.geocodingApiKey;
     if (!this.apiKey) {
       this.logger.warn('Chave Google não configurada corretamente. Street View não funcionará.');
     }
@@ -123,12 +124,12 @@ export class StreetViewService {
     address: string, 
     metadata: StreetViewMetadataResponse
   ): Promise<StreetViewCache> {
-    // Usar pano_id quando disponível (melhor para imagens 360), senão usar coordenadas
-    const imageUrl = metadata.status === 'OK' 
-      ? (metadata.pano_id 
-          ? this.buildImageUrlByPanoId(metadata.pano_id)
-          : this.buildImageUrl(metadata.location?.lat, metadata.location?.lng))
-      : null;
+    // Guardamos apenas o caminho do proxy interno. A URL real do Google
+    // carrega a API key e por isso nunca é persistida nem devolvida ao cliente.
+    const imageUrl =
+      metadata.status === 'OK' && (metadata.pano_id || metadata.location)
+        ? this.buildProxyImagePath(orderId)
+        : null;
 
     const user = this.tenantContext.getUser();
     const createdBy = user?.email ?? undefined;
@@ -150,53 +151,104 @@ export class StreetViewService {
   }
 
   /**
-   * Constrói URL da imagem usando pano_id (recomendado para imagens 360)
-   * O pano_id permite acesso direto ao panorama específico
+   * Caminho servido pelo próprio backend. É isto que vai para o banco e para
+   * o cliente — a API key fica exclusivamente no servidor.
    */
-  private buildImageUrlByPanoId(
-    panoId: string,
-    size: string = '600x400',
-    heading: number = 0,
-    pitch: number = 0,
-    fov: number = 90
-  ): string {
+  private buildProxyImagePath(orderId: number): string {
+    return `/street-view/order/${orderId}/image`;
+  }
+
+  /**
+   * URL real do Google, montada apenas no momento de buscar a imagem
+   * server-side. Nunca é persistida nem serializada em resposta.
+   */
+  private buildGoogleImageUrl(
+    cache: Pick<StreetViewCache, 'pano_id' | 'latitude' | 'longitude'>,
+    size = '640x640',
+    heading = 0,
+    pitch = 0,
+    fov = 120,
+  ): string | null {
     const params = new URLSearchParams({
-      size: size,
-      pano: panoId,
-      heading: heading.toString(),
-      pitch: pitch.toString(),
-      fov: fov.toString(),
-      key: this.apiKey
+      size,
+      heading: String(heading),
+      pitch: String(pitch),
+      fov: String(fov),
+      key: this.apiKey,
     });
+
+    if (cache.pano_id) {
+      params.set('pano', cache.pano_id);
+    } else if (cache.latitude != null && cache.longitude != null) {
+      params.set('location', `${cache.latitude},${cache.longitude}`);
+    } else {
+      return null;
+    }
 
     return `${this.imageBaseUrl}?${params.toString()}`;
   }
 
   /**
-   * Constrói URL da imagem usando coordenadas (fallback quando pano_id não está disponível)
+   * Busca a imagem no Google server-side e devolve os bytes, para que o
+   * controller faça o streaming sem expor a credencial.
    */
-  private buildImageUrl(
-    latitude?: number, 
-    longitude?: number, 
-    size: string = '600x400',
-    heading: number = 0,
-    pitch: number = 0,
-    fov: number = 90
-  ): string {
-    if (!latitude || !longitude) {
-      return null;
+  async getStreetViewImage(
+    orderId: number,
+  ): Promise<{ data: Buffer; contentType: string }> {
+    if (!this.apiKey) {
+      throw new HttpException(
+        'API Key do Google Street View não configurada',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
-    const params = new URLSearchParams({
-      size: size,
-      location: `${latitude},${longitude}`,
-      heading: heading.toString(),
-      pitch: pitch.toString(),
-      fov: fov.toString(),
-      key: this.apiKey
+    const idCompany = this.tenantContext.getIdCompany();
+
+    // Garante que o pedido é da empresa do usuário antes de gastar cota.
+    const cache = await this.streetViewCacheRepository.findOne({
+      where: { order_id: orderId, id_company: idCompany },
     });
 
-    return `${this.imageBaseUrl}?${params.toString()}`;
+    if (!cache) {
+      // Ainda não consultado: busca os metadados primeiro (já valida o tenant).
+      await this.getStreetViewData(orderId);
+      const created = await this.streetViewCacheRepository.findOne({
+        where: { order_id: orderId, id_company: idCompany },
+      });
+      if (!created) {
+        throw new NotFoundException(`Street View indisponível para o pedido ${orderId}`);
+      }
+      return this.downloadImage(created);
+    }
+
+    return this.downloadImage(cache);
+  }
+
+  private async downloadImage(
+    cache: StreetViewCache,
+  ): Promise<{ data: Buffer; contentType: string }> {
+    const url = this.buildGoogleImageUrl(cache);
+
+    if (!url) {
+      throw new NotFoundException('Não há imagem de Street View para este endereço');
+    }
+
+    try {
+      const response = await axios.get<ArrayBuffer>(url, {
+        responseType: 'arraybuffer',
+      });
+
+      return {
+        data: Buffer.from(response.data),
+        contentType: String(response.headers['content-type'] ?? 'image/jpeg'),
+      };
+    } catch (error) {
+      this.logger.error(`Erro ao baixar imagem do Street View do pedido ${cache.order_id}`, error);
+      throw new HttpException(
+        'Erro ao obter imagem do Street View',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
   }
 
   private formatAddress(order: Order): string {
@@ -215,11 +267,9 @@ export class StreetViewService {
 
   private formatResponse(cache: StreetViewCache): StreetViewResponseDto {
     const hasStreetView = cache.status === 'OK';
-    
-    // Gerar URL 360 completa se pano_id estiver disponível
-    const imageUrl360 = hasStreetView && cache.pano_id
-      ? this.buildImageUrlByPanoId(cache.pano_id, '640x640', 0, 0, 120) // FOV maior para visualização 360
-      : cache.image_url;
+
+    // Sempre o caminho do proxy interno — a URL do Google fica no servidor.
+    const imageUrl = hasStreetView ? this.buildProxyImagePath(cache.order_id) : null;
 
     return {
       success: true,
@@ -235,30 +285,9 @@ export class StreetViewService {
         ? { latitude: Number(cache.latitude), longitude: Number(cache.longitude) }
         : undefined,
       captureDate: cache.capture_date || undefined,
-      imageUrl: imageUrl360 || cache.image_url || undefined,
+      imageUrl: imageUrl || undefined,
       cachedAt: cache.created_at
     };
-  }
-
-  /**
-   * Gera URL para visualização 360 interativa usando Maps JavaScript API
-   * Esta URL pode ser usada no frontend para exibir panorama interativo
-   */
-  getInteractive360Url(panoId?: string, latitude?: number, longitude?: number): string | null {
-    if (!panoId && (!latitude || !longitude)) {
-      return null;
-    }
-
-    // Para visualização interativa 360, use o Maps JavaScript API no frontend
-    // Este método retorna os parâmetros necessários
-    const params = panoId 
-      ? `pano=${panoId}`
-      : `location=${latitude},${longitude}`;
-    
-    // Nota: Para visualização interativa completa, você precisará usar
-    // a Maps JavaScript API no frontend com o StreetViewPanorama
-    // Esta URL é apenas uma referência para os parâmetros
-    return `streetview://?${params}`;
   }
 
   // Método para invalidar cache (útil se precisar forçar atualização)

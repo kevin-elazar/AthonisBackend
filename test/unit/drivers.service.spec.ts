@@ -7,6 +7,21 @@ import { Driver } from '@/shared/entities/driver.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
 import { createDriverDto } from '../fixtures/driver.fixtures';
 
+
+/** Query builder encadeavel para as consultas agregadas (pedidos por cliente/motorista). */
+const createAggregateQueryBuilderMock = (rows: any[] = []) => {
+  const qb: any = {
+    select: jest.fn(() => qb),
+    addSelect: jest.fn(() => qb),
+    from: jest.fn(() => qb),
+    where: jest.fn(() => qb),
+    andWhere: jest.fn(() => qb),
+    groupBy: jest.fn(() => qb),
+    getRawMany: jest.fn().mockResolvedValue(rows),
+  };
+  return qb;
+};
+
 describe('DriversService', () => {
   let service: DriversService;
   let driverRepository: Repository<Driver>;
@@ -19,6 +34,7 @@ describe('DriversService', () => {
     document: '12345678900',
     gender: 'M',
     birth_date: new Date('1990-01-15'),
+    status: 'available' as const,
     created_at: new Date(),
     updated_at: new Date(),
     created_by: 'admin@athonis.com',
@@ -37,6 +53,9 @@ describe('DriversService', () => {
             findOne: jest.fn(),
             findAndCount: jest.fn().mockResolvedValue([[mockDriver], 1]),
             remove: jest.fn(),
+            manager: {
+              createQueryBuilder: jest.fn(() => createAggregateQueryBuilderMock()),
+            },
           },
         },
         {

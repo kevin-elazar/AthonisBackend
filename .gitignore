@@ -7,8 +7,10 @@ package-lock.json
 logs
 *.log
 
-# Database
-#src/database/*.sqlite
+# Database (nunca versionar: contém hash de senha e PII de clientes)
+src/database/*.sqlite
+src/database/*.sqlite-journal
+*.sqlite
 
 # Environment
 .env
@@ -19,3 +21,10 @@ client_secret.json
 # Test
 test-db.sqlite
 coverage/
+# Backups gerados por scripts/reset-data.js
+*.sqlite.bak-*
+
+# Credenciais do Google (conta de servico) — nunca versionar
+athonis-*.json
+credentials/
+*-service-account*.json

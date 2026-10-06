@@ -35,11 +35,12 @@ export class VehiclesService {
         limit = 10, 
         name, 
         brand,
+        status,
         sort_by = 'name',
         order = 'ASC' 
       } = query;
   
-      const where = this.buildSearchConditions({ name, brand });
+      const where = this.buildSearchConditions({ name, brand, status });
       where.id_company = this.tenantContext.getIdCompany();
   
       const allowedFields = ['name', 'brand', 'model', 'year'];
@@ -51,8 +52,7 @@ export class VehiclesService {
         where,
         order: { [sort_by]: order },
         skip: (page - 1) * limit,
-        take: limit,
-        cache: true
+        take: limit
       });
   
       return {
@@ -72,8 +72,12 @@ export class VehiclesService {
     }
   }
 
-  private buildSearchConditions({ name, brand }: Partial<FindVehicleDto>) {
+  private buildSearchConditions({ name, brand, status }: Partial<FindVehicleDto>) {
     const where: FindOptionsWhere<Vehicle> = {};
+
+    if (status) {
+      where.status = status;
+    }
 
     if (name) {
       where.name = Like(`%${name.trim()}%`);

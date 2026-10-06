@@ -6,9 +6,10 @@ import { Client } from "../../shared/entities/client.entity";
 import { HttpExceptionFilter } from "../../filters/http-exception.filter";
 import { APP_FILTER } from "@nestjs/core";
 import { TenantModule } from "@/shared/tenant/tenant.module";
+import { GeocodingModule } from "../../shared/geocoding/geocoding.module";
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Client]), TenantModule],
+  imports: [TypeOrmModule.forFeature([Client]), TenantModule, GeocodingModule],
   controllers: [ClientsController],
   providers: [
     ClientsService,

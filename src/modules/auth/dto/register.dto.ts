@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { USER_ROLES, UserRole } from '../../../shared/domain/enums';
 
 export class RegisterDto {
   @ApiProperty({ 
@@ -27,14 +28,15 @@ export class RegisterDto {
   @IsNotEmpty({ message: 'Nome é obrigatório' })
   name: string;
 
-  @ApiProperty({ 
-    description: 'Função do usuário', 
+  @ApiProperty({
+    description: 'Funcao do usuario',
+    enum: USER_ROLES,
     example: 'user',
     required: false,
-    default: 'user'
+    default: 'user',
   })
-  @IsString()
   @IsOptional()
-  role?: string;
+  @IsIn(USER_ROLES, { message: 'Funcao deve ser uma de: admin, user' })
+  role?: UserRole;
 }
 

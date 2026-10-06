@@ -5,7 +5,7 @@ export const createDriverDto = {
   name: 'Pedro Silva',
   document: '12345678900',
   gender: 'M',
-  birth_date: new Date('1990-01-15'),
+  birth_date: '1990-01-15',
 };
 
 export const findDriverDto = {

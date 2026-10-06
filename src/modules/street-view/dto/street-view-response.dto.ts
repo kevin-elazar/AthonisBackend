@@ -1,4 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsInt } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class StreetViewCoordinatesDto {
   @ApiProperty({ 
@@ -89,9 +91,14 @@ export class StreetViewResponseDto {
 
 export class StreetViewBatchRequestDto {
   @ApiProperty({
-    description: 'Lista de IDs de pedidos para buscar dados do Street View',
+    description: 'Lista de IDs de pedidos para buscar dados do Street View (máximo 25)',
     example: [1, 2, 3],
     type: [Number]
   })
+  @IsArray({ message: 'orderIds deve ser uma lista' })
+  @ArrayNotEmpty({ message: 'Informe ao menos um pedido' })
+  @ArrayMaxSize(25, { message: 'No máximo 25 pedidos por requisição' })
+  @IsInt({ each: true, message: 'Cada ID de pedido deve ser um número inteiro' })
+  @Type(() => Number)
   orderIds: number[];
 }

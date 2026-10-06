@@ -4,12 +4,13 @@ import { OptimizationRoutesController } from './controllers/optimization-routes.
 import { OptimizedRoutesHistoryController } from './controllers/optimized-routes-history.controller';
 import { OptimizationRoutesService } from './services/optimization-routes.service';
 import { OptimizedRoutesHistoryService } from './services/optimized-routes-history.service';
-import { GeocodingService } from './services/geocoding.service';
 import { Order } from '../shared/entities/order.entity';
 import { Client } from '../shared/entities/client.entity';
 import { Driver } from '../shared/entities/driver.entity';
 import { Vehicle } from '../shared/entities/vehicle.entity';
 import { OptimizedRouteHistory } from '../shared/entities/optimized-route-history.entity';
+import { GeocodingModule } from '../shared/geocoding/geocoding.module';
+import { CompanyModule } from '../modules/company/company.module';
 
 @Module({
   imports: [
@@ -19,7 +20,10 @@ import { OptimizedRouteHistory } from '../shared/entities/optimized-route-histor
       Driver, 
       Vehicle,
       OptimizedRouteHistory
-    ])
+    ]),
+    GeocodingModule,
+    // Depósito, custos e tempo de parada vêm do cadastro da empresa.
+    CompanyModule
   ],
   controllers: [
     OptimizationRoutesController,
@@ -27,13 +31,12 @@ import { OptimizedRouteHistory } from '../shared/entities/optimized-route-histor
   ],
   providers: [
     OptimizationRoutesService,
-    OptimizedRoutesHistoryService,
-    GeocodingService
+    OptimizedRoutesHistoryService
   ],
   exports: [
     OptimizationRoutesService,
     OptimizedRoutesHistoryService,
-    GeocodingService
+    GeocodingModule
   ]
 })
 export class OptimizationRoutesModule {}

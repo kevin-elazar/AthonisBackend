@@ -1,4 +1,5 @@
 import { IsNotEmpty, IsOptional, IsEmail, IsIn, IsDate } from 'class-validator';
+import { CLIENT_STATUSES, ClientStatus } from '../../../shared/domain/enums';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -69,4 +70,14 @@ export class CreateClientDto {
   @ApiProperty({ description: 'Observações/Anotações (opcional)', required: false })
   @IsOptional()
   notes?: string;
+
+  @ApiProperty({
+    description: 'Situação do cliente',
+    enum: CLIENT_STATUSES,
+    required: false,
+    default: 'active',
+  })
+  @IsOptional()
+  @IsIn(CLIENT_STATUSES, { message: 'Status deve ser um de: active, inactive' })
+  status?: ClientStatus;
 }

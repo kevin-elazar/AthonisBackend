@@ -25,12 +25,50 @@ import { CreateOrderDto } from '../../orders/dto/create-order.dto';
 import { ImportResultDto, OrderSuccessDto, OrderFailureDto } from '../dto/import-result.dto';
 import { RejectedFileListDto, RejectedFileDto } from '../dto/rejected-file-list.dto';
 import { FindRejectedFilesDto } from '../dto/find-rejected-files.dto';
+import { config } from '../../../config/env.config';
+
+type TenantReferenceIds = {
+  clientIds: Set<number>;
+  vehicleIds: Set<number>;
+  driverIds: Set<number>;
+};
 
 @Injectable()
 export class OrderImportsService {
   private readonly logger = new Logger(OrderImportsService.name);
-  private readonly uploadsDir = 'importacoes';
-  private readonly rejectedDir = 'importacoes/rejeicao';
+  private readonly uploadsRoot = config.uploads.rootDir;
+
+  /**
+   * Cada empresa tem sua própria árvore de arquivos. Sem isso, listar ou
+   * baixar um arquivo de rejeição exporia dados de entrega de outros tenants.
+   */
+  private tenantUploadsDir(): string {
+    return path.join(this.uploadsRoot, String(this.tenantContext.getIdCompany()));
+  }
+
+  private tenantRejectedDir(): string {
+    return path.join(this.tenantUploadsDir(), 'rejeicao');
+  }
+
+  /**
+   * Reduz um nome vindo do cliente a um componente de caminho seguro:
+   * descarta diretórios e mantém apenas caracteres previsíveis.
+   */
+  private safeFileStem(originalName: string): string {
+    const base = path.basename(originalName).replace(/[.]csv$/i, '');
+    const cleaned = base.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^[._]+/, '');
+    return cleaned.slice(0, 80) || 'importacao';
+  }
+
+  /**
+   * Neutraliza fórmulas em CSV: uma célula iniciada por = + - @ tab ou CR
+   * é interpretada como fórmula pelo Excel ao abrir o arquivo de rejeição.
+   */
+  private escapeCsvValue(value: unknown): unknown {
+    if (typeof value !== 'string' || value.length === 0) return value;
+    const FORMULA_TRIGGERS = [61, 43, 45, 64, 9, 13]; // = + - @ TAB CR
+    return FORMULA_TRIGGERS.includes(value.charCodeAt(0)) ? `'${value}` : value;
+  }
 
   constructor(
     @InjectRepository(Client)
@@ -48,13 +86,15 @@ export class OrderImportsService {
    */
   async saveUploadedFile(file: any, originalName: string): Promise<string> {
     try {
-      // Criar pasta se não existir
-      await fs.mkdir(this.uploadsDir, { recursive: true });
+      // Criar pasta da empresa se não existir
+      const uploadsDir = this.tenantUploadsDir();
+      await fs.mkdir(uploadsDir, { recursive: true });
 
-      // Gerar nome único com timestamp
+      // Nome sempre derivado no servidor — o nome enviado pelo cliente entra
+      // apenas como rótulo sanitizado, nunca como caminho.
       const timestamp = format(new Date(), 'yyyyMMdd_HHmmss');
-      const fileName = `${originalName.replace('.csv', '')}_${timestamp}.csv`;
-      const filePath = path.join(this.uploadsDir, fileName);
+      const fileName = `${this.safeFileStem(originalName)}_${timestamp}.csv`;
+      const filePath = path.join(uploadsDir, fileName);
 
       // Salvar arquivo
       await fs.writeFile(filePath, file.buffer);
@@ -143,54 +183,63 @@ export class OrderImportsService {
   }
 
   /**
-   * Valida se as referências (FKs) existem no banco de dados
+   * Carrega uma única vez os IDs de cliente, veículo e motorista da empresa.
+   * Antes eram três consultas por linha do CSV — 30 mil consultas num arquivo
+   * de 10 mil linhas.
    */
-  async validateReferences(orderData: any): Promise<{ isValid: boolean; errors: string[] }> {
-    const errors: string[] = [];
+  private async loadTenantReferenceIds(): Promise<TenantReferenceIds> {
     const idCompany = this.tenantContext.getIdCompany();
 
-    try {
-      // Validar client_id (obrigatório) - deve pertencer à empresa do usuário
-      if (orderData.client_id) {
-        const client = await this.clientRepository.findOne({
-          where: { client_id: orderData.client_id, id_company: idCompany }
-        });
-        if (!client) {
-          errors.push(`Cliente com ID ${orderData.client_id} não existe no sistema ou não pertence à sua empresa`);
-        }
-      }
+    const [clients, vehicles, drivers] = await Promise.all([
+      this.clientRepository.find({
+        where: { id_company: idCompany },
+        select: { client_id: true },
+      }),
+      this.vehicleRepository.find({
+        where: { id_company: idCompany },
+        select: { vehicle_id: true },
+      }),
+      this.driverRepository.find({
+        where: { id_company: idCompany },
+        select: { driver_id: true },
+      }),
+    ]);
 
-      // Validar vehicle_id (opcional)
-      if (orderData.vehicle_id) {
-        const vehicle = await this.vehicleRepository.findOne({
-          where: { vehicle_id: orderData.vehicle_id, id_company: idCompany }
-        });
-        if (!vehicle) {
-          errors.push(`Veículo com ID ${orderData.vehicle_id} não existe no sistema ou não pertence à sua empresa`);
-        }
-      }
+    return {
+      clientIds: new Set(clients.map((client) => client.client_id)),
+      vehicleIds: new Set(vehicles.map((vehicle) => vehicle.vehicle_id)),
+      driverIds: new Set(drivers.map((driver) => driver.driver_id)),
+    };
+  }
 
-      // Validar driver_id (opcional)
-      if (orderData.driver_id) {
-        const driver = await this.driverRepository.findOne({
-          where: { driver_id: orderData.driver_id, id_company: idCompany }
-        });
-        if (!driver) {
-          errors.push(`Motorista com ID ${orderData.driver_id} não existe no sistema ou não pertence à sua empresa`);
-        }
-      }
+  /**
+   * Valida se as referências (FKs) existem e pertencem à empresa do usuário.
+   */
+  validateReferences(
+    orderData: any,
+    refs: TenantReferenceIds,
+  ): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
 
-      return {
-        isValid: errors.length === 0,
-        errors
-      };
-    } catch (error) {
-      this.logger.error(`Erro ao validar referências: ${error}`);
-      return {
-        isValid: false,
-        errors: ['Erro ao validar referências no banco de dados']
-      };
+    if (orderData.client_id && !refs.clientIds.has(orderData.client_id)) {
+      errors.push(
+        `Cliente com ID ${orderData.client_id} não existe no sistema ou não pertence à sua empresa`,
+      );
     }
+
+    if (orderData.vehicle_id && !refs.vehicleIds.has(orderData.vehicle_id)) {
+      errors.push(
+        `Veículo com ID ${orderData.vehicle_id} não existe no sistema ou não pertence à sua empresa`,
+      );
+    }
+
+    if (orderData.driver_id && !refs.driverIds.has(orderData.driver_id)) {
+      errors.push(
+        `Motorista com ID ${orderData.driver_id} não existe no sistema ou não pertence à sua empresa`,
+      );
+    }
+
+    return { isValid: errors.length === 0, errors };
   }
 
   /**
@@ -204,6 +253,9 @@ export class OrderImportsService {
 
     // Detectar o delimitador
     const delimiter = await this.detectDelimiter(filePath);
+
+    // Uma consulta por tipo de referência para o arquivo inteiro.
+    const refs = await this.loadTenantReferenceIds();
 
     return new Promise((resolve, reject) => {
       const rows: any[] = [];
@@ -271,7 +323,7 @@ export class OrderImportsService {
               }
 
               // Validar referências (FKs) - sempre executa, mesmo se já houver erros de validação
-              const refValidation = await this.validateReferences(orderData);
+              const refValidation = this.validateReferences(orderData, refs);
               if (!refValidation.isValid) {
                 errors.push(...refValidation.errors);
               }
@@ -319,20 +371,24 @@ export class OrderImportsService {
     }
 
     try {
-      // Criar pasta de rejeições se não existir
-      await fs.mkdir(this.rejectedDir, { recursive: true });
+      // Criar pasta de rejeições da empresa se não existir
+      const rejectedDir = this.tenantRejectedDir();
+      await fs.mkdir(rejectedDir, { recursive: true });
 
       // Gerar nome do arquivo de rejeição
       const timestamp = format(new Date(), 'yyyyMMdd_HHmmss');
-      const fileName = `REJEICAO_${path.basename(originalFileName, '.csv')}_${timestamp}.csv`;
-      const filePath = path.join(this.rejectedDir, fileName);
+      const fileName = `REJEICAO_${this.safeFileStem(originalFileName)}_${timestamp}.csv`;
+      const filePath = path.join(rejectedDir, fileName);
 
-      // Preparar dados para escrita
-      const records = rejectedRows.map(row => ({
-        linha: row.linha,
-        ...row.dados,
-        motivo_rejeicao: row.erros.join(' | ')
-      }));
+      // Preparar dados para escrita, neutralizando fórmulas de planilha
+      const records = rejectedRows.map(row => {
+        const escaped: Record<string, unknown> = { linha: row.linha };
+        for (const [key, value] of Object.entries(row.dados ?? {})) {
+          escaped[key] = this.escapeCsvValue(value);
+        }
+        escaped.motivo_rejeicao = this.escapeCsvValue(row.erros.join(' | '));
+        return escaped;
+      });
 
       // Obter cabeçalhos dinamicamente
       const headers = Array.from(
@@ -474,12 +530,19 @@ export class OrderImportsService {
    */
   async getRejectedFilePath(filename: string): Promise<string> {
     try {
-      // Validar filename contra path traversal
-      if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      // Um nome válido é sempre um único componente de caminho.
+      if (!filename || filename !== path.basename(filename) || filename.includes('..')) {
         throw new BadRequestException('Nome de arquivo inválido');
       }
 
-      const filePath = path.join(this.rejectedDir, filename);
+      // Confinado à pasta da própria empresa: o caminho resolvido precisa
+      // continuar dentro do diretório do tenant.
+      const rejectedDir = path.resolve(this.tenantRejectedDir());
+      const filePath = path.resolve(rejectedDir, filename);
+
+      if (!filePath.startsWith(rejectedDir + path.sep)) {
+        throw new BadRequestException('Nome de arquivo inválido');
+      }
 
       // Verificar se arquivo existe
       try {
@@ -515,9 +578,10 @@ export class OrderImportsService {
    */
   async listRejectedFiles(filters?: FindRejectedFilesDto): Promise<RejectedFileListDto> {
     try {
-      // Verificar se o diretório existe
+      // Verificar se o diretório da empresa existe
+      const rejectedDir = this.tenantRejectedDir();
       try {
-        await fs.access(this.rejectedDir);
+        await fs.access(rejectedDir);
       } catch {
         // Se o diretório não existir, retornar lista vazia
         return {
@@ -527,7 +591,7 @@ export class OrderImportsService {
       }
 
       // Ler todos os arquivos do diretório
-      const files = await fs.readdir(this.rejectedDir);
+      const files = await fs.readdir(rejectedDir);
       
       // Filtrar apenas arquivos CSV de rejeição (que começam com REJEICAO_)
       const rejectedFiles = files.filter(file => 
@@ -537,7 +601,7 @@ export class OrderImportsService {
       // Obter informações de cada arquivo
       let fileInfos: RejectedFileDto[] = await Promise.all(
         rejectedFiles.map(async (filename) => {
-          const filePath = path.join(this.rejectedDir, filename);
+          const filePath = path.join(rejectedDir, filename);
           const stats = await fs.stat(filePath);
 
           return {
