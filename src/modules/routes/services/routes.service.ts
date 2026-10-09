@@ -10,7 +10,7 @@ import { Route } from '../../../shared/entities/route.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
 import { Vehicle } from '../../../shared/entities/vehicle.entity';
-import { RouteStatus } from '../../../shared/domain/enums';
+import { FINAL_STOP_STATUSES, RouteStatus } from '../../../shared/domain/enums';
 import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 import { FindRouteDto } from '../dto/find-route.dto';
 
@@ -188,13 +188,14 @@ export class RoutesService {
     if (!order) {
       throw new NotFoundException(`Pedido ${orderId} não faz parte da rota ${routeId}`);
     }
-    if (order.status === 'delivered') {
+    if (FINAL_STOP_STATUSES.includes(order.status)) {
       throw new BadRequestException('Esta parada já foi baixada');
     }
 
     const agora = new Date();
+    // Parada com ocorrência também está resolvida: o entregador esteve lá.
     const restantes = route.orders.filter(
-      (item) => item.order_id !== orderId && item.status !== 'delivered',
+      (item) => item.order_id !== orderId && !FINAL_STOP_STATUSES.includes(item.status),
     );
 
     await this.dataSource.transaction(async (manager) => {
@@ -237,9 +238,9 @@ export class RoutesService {
     // Entrega concluída é fato registrado. Apagar a rota deixaria esses
     // pedidos apontando para algo que não existe mais, e a entrega perderia
     // o contexto de quando e por qual rota aconteceu.
-    if (route.orders.some((order) => order.status === 'delivered')) {
+    if (route.orders.some((order) => FINAL_STOP_STATUSES.includes(order.status))) {
       throw new BadRequestException(
-        'A rota já tem entregas concluídas e não pode ser excluída. Cancele-a para liberar os pedidos restantes.',
+        'A rota já tem paradas baixadas e não pode ser excluída. Cancele-a para liberar os pedidos restantes.',
       );
     }
 

@@ -13,6 +13,7 @@ import { RoutesModule } from "./modules/routes/routes.module";
 import { StreetViewModule } from "./modules/street-view/street-view.module";
 import { CompanyModule } from "./modules/company/company.module";
 import { DriverAppModule } from "./modules/driver-app/driver-app.module";
+import { AnalyticsModule } from "./modules/analytics/analytics.module";
 import { DriverRestrictionGuard } from "./modules/auth/guards/driver-restriction.guard";
 
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
@@ -24,11 +25,16 @@ import { TenantInterceptor } from "./shared/tenant/tenant.interceptor";
 
 @Module({
   imports: [
-    ThrottlerModule.forRoot([
-      { name: "short", ttl: 1000, limit: 10 },
-      { name: "medium", ttl: 10000, limit: 50 },
-      { name: "long", ttl: 60000, limit: 100 },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        { name: "short", ttl: 1000, limit: 10 },
+        { name: "medium", ttl: 10000, limit: 50 },
+        { name: "long", ttl: 60000, limit: 100 },
+      ],
+      // A suíte e2e dispara centenas de chamadas em segundos a partir do mesmo
+      // endereço; com o limite ligado ela testaria o throttler, não a API.
+      skipIf: () => process.env.NODE_ENV === "test",
+    }),
     TypeOrmModule.forRoot(databaseConfig),
     TenantModule,
     AuthModule,
@@ -42,6 +48,7 @@ import { TenantInterceptor } from "./shared/tenant/tenant.interceptor";
     RoutesModule,
     StreetViewModule,
     DriverAppModule,
+    AnalyticsModule,
   ],
   providers: [
     {

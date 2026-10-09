@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -6,20 +7,33 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { DataSource, In, Not, Repository } from 'typeorm';
 import { Route } from '../../../shared/entities/route.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
+import { Vehicle } from '../../../shared/entities/vehicle.entity';
+import { RouteLocationPing } from '../../../shared/entities/route-location-ping.entity';
 import { Company } from '../../../shared/entities/company.entity';
 import { RouteEvent } from '../../../shared/entities/route-event.entity';
 import { OptimizedRouteHistory } from '../../../shared/entities/optimized-route-history.entity';
-import { RouteEventType } from '../../../shared/domain/enums';
+import {
+  FINAL_STOP_STATUSES,
+  OrderStatus,
+  RouteEventType,
+  RouteStatus,
+} from '../../../shared/domain/enums';
+import { plannedArrivalsByOrder } from '../../../shared/domain/planned-arrivals';
 import { todayInTimeZone } from '../../../shared/domain/timezone';
 import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 import { RoutesService } from '../../routes/services/routes.service';
-import { DriverEventDto } from '../dto/driver-event.dto';
+import { DeliverStopDto, DriverEventDto, FailStopDto } from '../dto/driver-event.dto';
+import { LocationBatchDto } from '../dto/location-batch.dto';
+import { RouteMetricsService } from '../../analytics/route-metrics.service';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
+
+/** Linhas por INSERT ao gravar o rastro: mantém o comando abaixo do limite de parâmetros do SQLite. */
+const PING_INSERT_CHUNK = 50;
 
 /** Relógio do aparelho adiantado além disto é tratado como erro e trocado pela hora do servidor. */
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -94,7 +108,11 @@ export class DriverRoutesService {
     private eventRepository: Repository<RouteEvent>,
     @InjectRepository(OptimizedRouteHistory)
     private historyRepository: Repository<OptimizedRouteHistory>,
+    @InjectRepository(RouteLocationPing)
+    private pingRepository: Repository<RouteLocationPing>,
     private routesService: RoutesService,
+    private routeMetricsService: RouteMetricsService,
+    private dataSource: DataSource,
     private tenantContext: TenantContextService,
   ) {}
 
@@ -185,6 +203,195 @@ export class DriverRoutesService {
 
     await this.recordEvent(route, 'route_started', dto, occurredAt);
     return this.findOne(routeId);
+  }
+
+  /**
+   * Chegada à parada. Não muda o pedido: marca a hora, que é o que permite
+   * medir pontualidade e tempo de atendimento.
+   */
+  async arrive(routeId: number, orderId: number, dto: DriverEventDto): Promise<DriverRouteView> {
+    if (await this.alreadyProcessed(dto.client_event_id)) {
+      return this.findOne(routeId);
+    }
+
+    const route = await this.findOwnRoute(routeId);
+    await this.findOpenStop(route, orderId);
+
+    await this.recordEvent(route, 'arrived', dto, this.occurredAt(dto), { order_id: orderId });
+    return this.findOne(routeId);
+  }
+
+  async deliver(routeId: number, orderId: number, dto: DeliverStopDto): Promise<DriverRouteView> {
+    return this.closeStop(routeId, orderId, 'delivered', dto, { notes: dto.notes });
+  }
+
+  /** Parada visitada e não entregue. O motivo é obrigatório: é o dado que o painel analisa. */
+  async fail(routeId: number, orderId: number, dto: FailStopDto): Promise<DriverRouteView> {
+    return this.closeStop(routeId, orderId, 'failed', dto, {
+      occurrence_type: dto.occurrence_type,
+      notes: dto.notes,
+    });
+  }
+
+  /**
+   * Encerra a rota. Diferente do "concluir" do escritório, aqui nada é dado
+   * como entregue por omissão: toda parada precisa de uma baixa ou de uma
+   * ocorrência, senão o painel passaria a contar como entrega o que o
+   * entregador apenas não registrou.
+   */
+  async finish(routeId: number, dto: DriverEventDto): Promise<DriverRouteView> {
+    if (await this.alreadyProcessed(dto.client_event_id)) {
+      return this.findOne(routeId);
+    }
+
+    const route = await this.findOwnRoute(routeId);
+    const occurredAt = this.occurredAt(dto);
+
+    if (route.status === 'active') {
+      const orders = await this.orderRepository.find({
+        where: { route_id: routeId, id_company: route.id_company },
+        order: { stop_sequence: 'ASC' },
+      });
+      const abertas = orders.filter((order) => !FINAL_STOP_STATUSES.includes(order.status));
+
+      if (abertas.length > 0) {
+        throw new BadRequestException({
+          message: `Ainda há ${abertas.length} parada(s) sem baixa. Registre a entrega ou a ocorrência de cada uma antes de encerrar.`,
+          // No formato de `errors` que o filtro de exceções preserva na resposta.
+          errors: abertas.map((order) => ({
+            field: `order_${order.order_id}`,
+            messages: [`Parada ${order.stop_sequence ?? '?'}: ${order.title}`],
+          })),
+        });
+      }
+
+      await this.dataSource.transaction(async (manager) => {
+        await manager.update(
+          Route,
+          { route_id: routeId },
+          {
+            status: 'completed' as RouteStatus,
+            finished_at: occurredAt,
+            updated_by: this.tenantContext.getUser()?.email ?? undefined,
+          },
+        );
+        if (route.driver_id) {
+          await manager.update(Driver, { driver_id: route.driver_id }, { status: 'available' });
+        }
+        if (route.vehicle_id) {
+          await manager.update(Vehicle, { vehicle_id: route.vehicle_id }, { status: 'available' });
+        }
+      });
+    } else if (route.status !== 'completed') {
+      // Rota já concluída passa direto: o escritório encerrou pelo sistema web
+      // e o aplicativo só está registrando o fim do lado dele.
+      throw new ConflictException(`Esta rota está como "${route.status}" e não pode ser encerrada`);
+    }
+
+    await this.recordEvent(route, 'route_finished', dto, occurredAt);
+    await this.consolidate(route);
+    return this.findOne(routeId);
+  }
+
+  /**
+   * Recebe um lote do rastro de GPS.
+   *
+   * Aceita pontos de uma rota já encerrada: com a fila offline, é normal o
+   * rastro chegar depois do encerramento. Nesse caso a comparação é refeita.
+   */
+  async recordLocations(routeId: number, dto: LocationBatchDto): Promise<{ accepted: number }> {
+    const route = await this.findOwnRoute(routeId);
+
+    if (route.status === 'planned' || route.status === 'cancelled') {
+      throw new ConflictException(`Esta rota está como "${route.status}" e não recebe rastreamento`);
+    }
+
+    const rows = dto.points.map((point) => ({
+      id_company: route.id_company,
+      route_id: route.route_id,
+      latitude: point.latitude,
+      longitude: point.longitude,
+      accuracy_m: point.accuracy_m,
+      // Alguns aparelhos informam -1 quando não sabem a velocidade.
+      speed_mps: point.speed_mps != null && point.speed_mps >= 0 ? point.speed_mps : undefined,
+      recorded_at: this.occurredAt({ occurred_at: point.recorded_at }),
+      client_ping_id: point.client_ping_id,
+    }));
+
+    for (let inicio = 0; inicio < rows.length; inicio += PING_INSERT_CHUNK) {
+      await this.pingRepository
+        .createQueryBuilder()
+        .insert()
+        .into(RouteLocationPing)
+        .values(rows.slice(inicio, inicio + PING_INSERT_CHUNK))
+        // Ponto reenviado bate no índice único e é ignorado.
+        .orIgnore()
+        .execute();
+    }
+
+    if (route.status === 'completed') {
+      await this.consolidate(route);
+    }
+
+    return { accepted: rows.length };
+  }
+
+  private async closeStop(
+    routeId: number,
+    orderId: number,
+    status: Extract<OrderStatus, 'delivered' | 'failed'>,
+    dto: DriverEventDto,
+    extra: Partial<RouteEvent>,
+  ): Promise<DriverRouteView> {
+    if (await this.alreadyProcessed(dto.client_event_id)) {
+      return this.findOne(routeId);
+    }
+
+    const route = await this.findOwnRoute(routeId);
+    await this.findOpenStop(route, orderId);
+    const occurredAt = this.occurredAt(dto);
+
+    await this.orderRepository.update(
+      { order_id: orderId, id_company: route.id_company },
+      {
+        status,
+        // A hora de entrega só faz sentido para o que foi entregue.
+        delivered_at: status === 'delivered' ? occurredAt : undefined,
+        updated_by: this.tenantContext.getUser()?.email ?? undefined,
+      },
+    );
+
+    await this.recordEvent(route, status, dto, occurredAt, { order_id: orderId, ...extra });
+    return this.findOne(routeId);
+  }
+
+  /** A parada precisa ser desta rota, com a rota em andamento e ainda sem baixa. */
+  private async findOpenStop(route: Route, orderId: number): Promise<Order> {
+    if (route.status !== 'active') {
+      throw new ConflictException(
+        `A rota está como "${route.status}". Só é possível registrar paradas com a rota em andamento.`,
+      );
+    }
+
+    const order = await this.orderRepository.findOne({
+      where: { order_id: orderId, route_id: route.route_id, id_company: route.id_company },
+    });
+    if (!order) {
+      throw new NotFoundException(`Pedido ${orderId} não faz parte da rota ${route.route_id}`);
+    }
+    if (FINAL_STOP_STATUSES.includes(order.status)) {
+      throw new ConflictException('Esta parada já foi encerrada');
+    }
+    return order;
+  }
+
+  /** A consolidação nunca derruba a ação do entregador: se falhar, o painel refaz depois. */
+  private async consolidate(route: Route): Promise<void> {
+    try {
+      await this.routeMetricsService.consolidate(route.route_id, route.id_company);
+    } catch (error) {
+      this.logger.error(`Falha ao consolidar a rota ${route.route_id}`, error as Error);
+    }
   }
 
   // ------------------------------------------------------------------ apoio
@@ -335,30 +542,6 @@ export class DriverRoutesService {
         .map((order) => toStopView(order, eventsByOrder.get(order.order_id) ?? [], plannedArrival)),
     }));
   }
-}
-
-/** Chegada prevista de cada pedido, lida do resultado gravado da otimização. */
-export function plannedArrivalsByOrder(
-  histories: Array<Pick<OptimizedRouteHistory, 'optimization_result'>>,
-): Map<number, string> {
-  const arrivals = new Map<number, string>();
-
-  for (const history of histories) {
-    try {
-      const result = JSON.parse(history.optimization_result ?? '{}');
-      for (const route of result?.routes ?? []) {
-        for (const stop of route?.stops ?? []) {
-          if (stop?.orderId && stop?.estimatedArrivalTime) {
-            arrivals.set(Number(stop.orderId), String(stop.estimatedArrivalTime));
-          }
-        }
-      }
-    } catch {
-      // Histórico ilegível não impede a rota de abrir: só fica sem previsão.
-    }
-  }
-
-  return arrivals;
 }
 
 function toStopView(
