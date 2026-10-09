@@ -12,6 +12,8 @@ import { OptimizationRoutesModule } from "./optimization-routes/optimization-rou
 import { RoutesModule } from "./modules/routes/routes.module";
 import { StreetViewModule } from "./modules/street-view/street-view.module";
 import { CompanyModule } from "./modules/company/company.module";
+import { DriverAppModule } from "./modules/driver-app/driver-app.module";
+import { DriverRestrictionGuard } from "./modules/auth/guards/driver-restriction.guard";
 
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { HttpExceptionFilter } from "./filters/http-exception.filter";
@@ -39,6 +41,7 @@ import { TenantInterceptor } from "./shared/tenant/tenant.interceptor";
     OptimizationRoutesModule,
     RoutesModule,
     StreetViewModule,
+    DriverAppModule,
   ],
   providers: [
     {
@@ -48,6 +51,11 @@ import { TenantInterceptor } from "./shared/tenant/tenant.interceptor";
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Depois do JwtAuthGuard, que é quem preenche request.user.
+    {
+      provide: APP_GUARD,
+      useClass: DriverRestrictionGuard,
     },
     {
       provide: APP_GUARD,

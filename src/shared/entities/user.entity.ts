@@ -32,6 +32,14 @@ export class User {
   @Column({ type: 'int' })
   id_company: number;
 
+  /**
+   * Motorista a que este login pertence. Só é preenchido para o papel
+   * 'driver': é por aqui que o aplicativo descobre de quem são as rotas, sem
+   * que o aparelho precise (ou possa) informar isso.
+   */
+  @Column({ type: 'int', nullable: true })
+  driver_id?: number | null;
+
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 

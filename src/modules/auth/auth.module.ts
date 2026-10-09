@@ -6,12 +6,13 @@ import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./strategies/jwt.strategy";
 import { User } from "../../shared/entities/user.entity";
+import { RefreshToken } from "../../shared/entities/refresh-token.entity";
 import { TenantModule } from "@/shared/tenant/tenant.module";
 import { config } from "../../config/env.config";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, RefreshToken]),
     TenantModule,
     PassportModule.register({ defaultStrategy: "jwt", session: false }),
     JwtModule.register({

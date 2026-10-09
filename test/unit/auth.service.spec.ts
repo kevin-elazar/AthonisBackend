@@ -5,6 +5,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuthService } from '@/modules/auth/auth.service';
 import { User } from '@/shared/entities/user.entity';
+import { RefreshToken } from '@/shared/entities/refresh-token.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
 import { loginDto, registerDto } from '../fixtures/auth.fixtures';
 
@@ -47,6 +48,16 @@ describe('AuthService', () => {
           provide: JwtService,
           useValue: {
             sign: jest.fn().mockReturnValue('mock-jwt-token'),
+            decode: jest.fn().mockReturnValue({ iat: 1000, exp: 4600 }),
+          },
+        },
+        {
+          provide: getRepositoryToken(RefreshToken),
+          useValue: {
+            findOne: jest.fn(),
+            create: jest.fn().mockImplementation((dto) => dto),
+            save: jest.fn().mockImplementation((token) => Promise.resolve({ ...token, id: 1 })),
+            update: jest.fn().mockResolvedValue({ affected: 1 }),
           },
         },
         {
@@ -143,6 +154,94 @@ describe('AuthService', () => {
       jest.spyOn(userRepository, 'findOne').mockResolvedValue(null);
 
       await expect(service.getProfile(999)).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  /**
+   * A renovação é o que mantém o entregador logado o dia inteiro. O que
+   * importa: token trocado deixa de valer, mas não na hora — a resposta da
+   * troca pode se perder em rede ruim e o aparelho repete o pedido.
+   */
+  describe('refresh', () => {
+    let refreshRepository: Repository<RefreshToken>;
+
+    const guardado = (extra: Partial<RefreshToken> = {}) =>
+      ({
+        id: 9,
+        user_id: 1,
+        token_hash: 'hash',
+        expires_at: new Date(Date.now() + 60_000),
+        ...extra,
+      }) as RefreshToken;
+
+    beforeEach(() => {
+      refreshRepository = (service as any).refreshTokenRepository;
+      jest.spyOn(userRepository, 'findOne').mockResolvedValue(mockUser as User);
+    });
+
+    it('login devolve refresh_token e expires_in calculado do token', async () => {
+      const result = await service.login(loginDto);
+
+      expect(result.refresh_token).toEqual(expect.any(String));
+      expect(result.expires_in).toBe(3600);
+      expect(refreshRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: 1, token_hash: expect.stringMatching(/^[0-9a-f]{64}$/) }),
+      );
+    });
+
+    it('não guarda o refresh token em texto puro', async () => {
+      const result = await service.login(loginDto);
+      const salvo = (refreshRepository.save as jest.Mock).mock.calls[0][0];
+
+      expect(salvo.token_hash).not.toBe(result.refresh_token);
+    });
+
+    it('troca um token válido por um novo par e marca o antigo como trocado', async () => {
+      jest.spyOn(refreshRepository, 'findOne').mockResolvedValue(guardado());
+
+      const result = await service.refresh('token-do-aparelho');
+
+      expect(result.access_token).toBe('mock-jwt-token');
+      expect(refreshRepository.update).toHaveBeenCalledWith(
+        { id: 9 },
+        { replaced_at: expect.any(Date) },
+      );
+    });
+
+    it('aceita o token antigo de novo dentro da tolerância', async () => {
+      jest
+        .spyOn(refreshRepository, 'findOne')
+        .mockResolvedValue(guardado({ replaced_at: new Date(Date.now() - 30_000) }));
+
+      await expect(service.refresh('token-do-aparelho')).resolves.toHaveProperty('refresh_token');
+    });
+
+    it('recusa token trocado há mais tempo que a tolerância', async () => {
+      jest
+        .spyOn(refreshRepository, 'findOne')
+        .mockResolvedValue(guardado({ replaced_at: new Date(Date.now() - 10 * 60_000) }));
+
+      await expect(service.refresh('token-do-aparelho')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('recusa token revogado, expirado ou desconhecido', async () => {
+      const findOne = jest.spyOn(refreshRepository, 'findOne');
+
+      findOne.mockResolvedValueOnce(guardado({ revoked_at: new Date() }));
+      await expect(service.refresh('x')).rejects.toThrow(UnauthorizedException);
+
+      findOne.mockResolvedValueOnce(guardado({ expires_at: new Date(Date.now() - 1000) }));
+      await expect(service.refresh('x')).rejects.toThrow(UnauthorizedException);
+
+      findOne.mockResolvedValueOnce(null);
+      await expect(service.refresh('x')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('recusa quando o usuário foi desativado', async () => {
+      jest.spyOn(refreshRepository, 'findOne').mockResolvedValue(guardado());
+      jest.spyOn(userRepository, 'findOne').mockResolvedValue(null);
+
+      await expect(service.refresh('token-do-aparelho')).rejects.toThrow(UnauthorizedException);
     });
   });
 });

@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
-import { USER_ROLES, UserRole } from '../../../shared/domain/enums';
+import { OFFICE_ROLES, OfficeRole } from '../../../shared/domain/enums';
 
 export class RegisterDto {
   @ApiProperty({ 
@@ -30,13 +30,13 @@ export class RegisterDto {
 
   @ApiProperty({
     description: 'Funcao do usuario',
-    enum: USER_ROLES,
+    enum: OFFICE_ROLES,
     example: 'user',
     required: false,
     default: 'user',
   })
   @IsOptional()
-  @IsIn(USER_ROLES, { message: 'Funcao deve ser uma de: admin, user' })
-  role?: UserRole;
+  @IsIn(OFFICE_ROLES, { message: 'Funcao deve ser uma de: admin, user' })
+  role?: OfficeRole;
 }
 

@@ -2,12 +2,21 @@ import { Injectable, UnauthorizedException, ConflictException, Logger } from '@n
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { createHash, randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { User } from '../../shared/entities/user.entity';
+import { RefreshToken } from '../../shared/entities/refresh-token.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { TenantContextService } from '../../shared/tenant/tenant-context.service';
+import { config } from '../../config/env.config';
+
+/**
+ * Por quanto tempo um refresh token já trocado continua valendo. Cobre o
+ * caso em que a resposta da troca se perde e o aparelho repete o pedido.
+ */
+const ROTATION_GRACE_MS = 2 * 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -16,6 +25,8 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(RefreshToken)
+    private refreshTokenRepository: Repository<RefreshToken>,
     private jwtService: JwtService,
     private tenantContext: TenantContextService,
   ) {}
@@ -58,7 +69,7 @@ export class AuthService {
       this.logger.log(`Novo usuário registrado: ${savedUser.email}`);
 
       // Gerar token JWT
-      return this.generateAuthResponse(savedUser);
+      return await this.generateAuthResponse(savedUser);
     } catch (error) {
       this.logger.error('Erro ao registrar usuário:', error);
       throw error;
@@ -98,11 +109,66 @@ export class AuthService {
       this.logger.log(`Usuário autenticado: ${user.email}`);
 
       // Gerar token JWT
-      return this.generateAuthResponse(user);
+      return await this.generateAuthResponse(user, loginDto.device);
     } catch (error) {
       this.logger.error('Erro ao fazer login:', error);
       throw error;
     }
+  }
+
+  /**
+   * Troca um refresh token por um novo par. O token usado deixa de valer
+   * (salvo pela tolerância de ROTATION_GRACE_MS), de modo que um token
+   * copiado tem vida curta.
+   */
+  async refresh(refreshToken: string): Promise<AuthResponseDto> {
+    const stored = await this.refreshTokenRepository.findOne({
+      where: { token_hash: this.hashToken(refreshToken) },
+    });
+
+    const agora = Date.now();
+    const trocadoHaPouco =
+      !!stored?.replaced_at && agora - new Date(stored.replaced_at).getTime() < ROTATION_GRACE_MS;
+
+    if (
+      !stored ||
+      stored.revoked_at ||
+      new Date(stored.expires_at).getTime() <= agora ||
+      (stored.replaced_at && !trocadoHaPouco)
+    ) {
+      throw new UnauthorizedException('Sessão expirada. Faça login novamente.');
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { id: stored.user_id, is_active: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException('Sessão expirada. Faça login novamente.');
+    }
+
+    if (!stored.replaced_at) {
+      await this.refreshTokenRepository.update({ id: stored.id }, { replaced_at: new Date() });
+    }
+
+    return this.generateAuthResponse(user, stored.device);
+  }
+
+  /** Encerra a sessão do aparelho. Não falha se o token já não existir. */
+  async logout(refreshToken: string): Promise<void> {
+    await this.refreshTokenRepository.update(
+      { token_hash: this.hashToken(refreshToken) },
+      { revoked_at: new Date() },
+    );
+  }
+
+  /** Derruba todas as sessões de um usuário — usado ao trocar a senha ou desativar o acesso. */
+  async revokeAllSessions(userId: number): Promise<void> {
+    await this.refreshTokenRepository
+      .createQueryBuilder()
+      .update(RefreshToken)
+      .set({ revoked_at: new Date() })
+      .where('user_id = :userId AND revoked_at IS NULL', { userId })
+      .execute();
   }
 
   /**
@@ -138,31 +204,48 @@ export class AuthService {
     return userWithoutPassword;
   }
 
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
   /**
-   * Gera resposta de autenticação com token JWT
+   * Gera resposta de autenticação com access token e refresh token
    */
-  private generateAuthResponse(user: User): AuthResponseDto {
-    const payload = { 
-      sub: user.id, 
+  private async generateAuthResponse(user: User, device?: string): Promise<AuthResponseDto> {
+    const payload = {
+      sub: user.id,
       email: user.email,
       role: user.role,
-      id_company: user.id_company 
+      id_company: user.id_company
     };
 
     const access_token = this.jwtService.sign(payload);
+    const decoded = this.jwtService.decode(access_token) as { exp?: number; iat?: number } | null;
+    const expires_in = decoded?.exp && decoded?.iat ? decoded.exp - decoded.iat : 3600;
+
+    const refresh_token = randomBytes(48).toString('base64url');
+    await this.refreshTokenRepository.save(
+      this.refreshTokenRepository.create({
+        user_id: user.id,
+        token_hash: this.hashToken(refresh_token),
+        expires_at: new Date(Date.now() + config.jwt.refreshDays * 24 * 60 * 60 * 1000),
+        device: device ?? undefined,
+      }),
+    );
 
     return {
       access_token,
+      refresh_token,
       token_type: 'Bearer',
-      expires_in: 3600, // 1 hora
+      expires_in,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
         id_company: user.id_company,
+        driver_id: user.driver_id ?? null,
       },
     };
   }
 }
-

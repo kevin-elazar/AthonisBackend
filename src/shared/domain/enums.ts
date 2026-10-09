@@ -11,6 +11,7 @@ export const ORDER_STATUSES = [
   'planned',
   'in_route',
   'delivered',
+  'failed',
   'delayed',
   'cancelled',
 ] as const;
@@ -47,8 +48,47 @@ export type RouteStatus = (typeof ROUTE_STATUSES)[number];
 export const CLIENT_STATUSES = ['active', 'inactive'] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 
-export const USER_ROLES = ['admin', 'user'] as const;
+/**
+ * 'driver' é o papel do aplicativo do entregador. Ele só enxerga as próprias
+ * rotas: o DriverRestrictionGuard barra esse papel em todo endpoint que não
+ * foi marcado explicitamente com @AllowDriver().
+ */
+export const USER_ROLES = ['admin', 'user', 'driver'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+/** Papéis que o cadastro de usuário do escritório pode atribuir. */
+export const OFFICE_ROLES = ['admin', 'user'] as const;
+export type OfficeRole = (typeof OFFICE_ROLES)[number];
+
+/**
+ * O que o entregador registra em campo.
+ * 'arrived' não muda o pedido: marca a chegada, que é o que permite medir
+ * pontualidade e tempo de atendimento. 'delivered' e 'failed' encerram a parada.
+ */
+export const ROUTE_EVENT_TYPES = [
+  'route_started',
+  'arrived',
+  'delivered',
+  'failed',
+  'route_finished',
+] as const;
+export type RouteEventType = (typeof ROUTE_EVENT_TYPES)[number];
+
+/** Motivos de uma parada não entregue. */
+export const OCCURRENCE_TYPES = [
+  'customer_absent',
+  'address_not_found',
+  'refused',
+  'damaged_goods',
+  'closed_establishment',
+  'access_restricted',
+  'traffic',
+  'other',
+] as const;
+export type OccurrenceType = (typeof OCCURRENCE_TYPES)[number];
+
+/** Situações em que a parada não espera mais nenhuma ação do entregador. */
+export const FINAL_STOP_STATUSES: readonly OrderStatus[] = ['delivered', 'failed'];
 
 /**
  * Termos legados que já existem no banco e em planilhas de importação.

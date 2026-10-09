@@ -35,6 +35,7 @@ export const config = {
   jwt: {
     secret: requireEnv('JWT_SECRET'),
     expiresIn: process.env.JWT_EXPIRATION || '1h',
+    refreshDays: Number(process.env.JWT_REFRESH_DAYS) || 30,
   },
   cors: {
     origins: optionalEnv('CORS_ORIGIN')

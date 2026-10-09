@@ -4,4 +4,5 @@ export interface JwtUser {
   name: string;
   role: string;
   id_company: number;
+  driver_id?: number | null;
 }

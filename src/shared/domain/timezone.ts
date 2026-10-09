@@ -76,3 +76,23 @@ export function parseWindowText(
     fim: `${pad(partes[3])}:${partes[4]}`,
   };
 }
+
+/**
+ * Dia de hoje (AAAA-MM-DD) no fuso informado.
+ *
+ * "Hoje" para a operação é o dia da empresa, não o do servidor: às 22h de
+ * Brasília o servidor em UTC já virou o dia, e o entregador veria as rotas
+ * de amanhã.
+ */
+export function todayInTimeZone(timeZone: string, agora: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(agora);
+  } catch {
+    return agora.toISOString().slice(0, 10);
+  }
+}
