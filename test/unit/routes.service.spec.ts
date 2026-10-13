@@ -7,6 +7,7 @@ import { Route } from '@/shared/entities/route.entity';
 import { Order } from '@/shared/entities/order.entity';
 import { Driver } from '@/shared/entities/driver.entity';
 import { Vehicle } from '@/shared/entities/vehicle.entity';
+import { RouteEvent } from '@/shared/entities/route-event.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
 
 /**
@@ -64,6 +65,10 @@ describe('RoutesService', () => {
         },
         { provide: getRepositoryToken(Driver), useValue: {} },
         { provide: getRepositoryToken(Vehicle), useValue: {} },
+        {
+          provide: getRepositoryToken(RouteEvent),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
+        },
         {
           provide: DataSource,
           useValue: {

@@ -10,12 +10,26 @@ import { Route } from '../../../shared/entities/route.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
 import { Vehicle } from '../../../shared/entities/vehicle.entity';
+import { RouteEvent } from '../../../shared/entities/route-event.entity';
 import { FINAL_STOP_STATUSES, RouteStatus } from '../../../shared/domain/enums';
 import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 import { FindRouteDto } from '../dto/find-route.dto';
 
+/**
+ * Uma parada como a tela de rotas a mostra: o pedido, mais o que o
+ * entregador registrou ao encerrá-la no aplicativo.
+ */
+export type RouteStopOrder = Order & {
+  /** Motivo da não entrega. Vazio para o que foi entregue ou ainda está em aberto. */
+  occurrence_type?: string | null;
+  /** Observação escrita pelo entregador na entrega ou na ocorrência. */
+  driver_notes?: string | null;
+  /** Hora, no aparelho, em que a parada foi encerrada. */
+  closed_at?: Date | null;
+};
+
 /** Uma rota com os pedidos já na ordem das paradas. */
-export type RouteWithStops = Route & { orders: Order[] };
+export type RouteWithStops = Route & { orders: RouteStopOrder[] };
 
 @Injectable()
 export class RoutesService {
@@ -30,6 +44,8 @@ export class RoutesService {
     private driverRepository: Repository<Driver>,
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
+    @InjectRepository(RouteEvent)
+    private eventRepository: Repository<RouteEvent>,
     private dataSource: DataSource,
     private tenantContext: TenantContextService,
   ) {}
@@ -81,10 +97,31 @@ export class RoutesService {
       order: { stop_sequence: 'ASC' },
     });
 
-    const porRota = new Map<number, Order[]>();
+    // O que o entregador registrou ao encerrar cada parada. O pedido guarda só
+    // "não entregue"; o motivo e a observação estão no evento.
+    const encerramentos = await this.eventRepository.find({
+      where: {
+        route_id: In(routes.map((r) => r.route_id)),
+        id_company: idCompany,
+        type: In(['delivered', 'failed']),
+      },
+      order: { occurred_at: 'ASC' },
+    });
+    const ultimoPorPedido = new Map<number, RouteEvent>();
+    for (const event of encerramentos) {
+      if (event.order_id) ultimoPorPedido.set(event.order_id, event);
+    }
+
+    const porRota = new Map<number, RouteStopOrder[]>();
     for (const order of orders) {
+      const event = ultimoPorPedido.get(order.order_id);
       const lista = porRota.get(order.route_id) ?? [];
-      lista.push(order);
+      lista.push({
+        ...order,
+        occurrence_type: order.status === 'failed' ? (event?.occurrence_type ?? 'other') : null,
+        driver_notes: event?.notes ?? null,
+        closed_at: event?.occurred_at ?? order.delivered_at ?? null,
+      });
       porRota.set(order.route_id, lista);
     }
 

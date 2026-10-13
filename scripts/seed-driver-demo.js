@@ -152,8 +152,12 @@ async function main() {
     [idCompany, driver.driver_id, vehicle?.vehicle_id ?? null, dia, totalStops * 4200, totalStops * 22],
   );
 
+  // Cada rota comeca num ponto diferente da lista, para rodadas seguidas
+  // nao criarem varias rotas com exatamente as mesmas paradas.
+  const firstStop = (route.lastID * 3) % STOPS.length;
+
   for (let index = 0; index < totalStops; index += 1) {
-    const stop = STOPS[index];
+    const stop = STOPS[(firstStop + index) % STOPS.length];
     await run(
       `INSERT INTO "order"
          (id_company, title, description, invoice_number, urgency, status, quantity, delivery_window,

@@ -6,9 +6,10 @@ import { Route } from '../../shared/entities/route.entity';
 import { Order } from '../../shared/entities/order.entity';
 import { Driver } from '../../shared/entities/driver.entity';
 import { Vehicle } from '../../shared/entities/vehicle.entity';
+import { RouteEvent } from '../../shared/entities/route-event.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Route, Order, Driver, Vehicle])],
+  imports: [TypeOrmModule.forFeature([Route, Order, Driver, Vehicle, RouteEvent])],
   controllers: [RoutesController],
   providers: [RoutesService],
   exports: [RoutesService],
