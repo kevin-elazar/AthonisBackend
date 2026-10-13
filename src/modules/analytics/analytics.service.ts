@@ -14,6 +14,7 @@ import { OCCURRENCE_TYPES } from '../../shared/domain/enums';
 import { todayInTimeZone } from '../../shared/domain/timezone';
 import { TenantContextService } from '../../shared/tenant/tenant-context.service';
 import { RouteMetricsService } from './route-metrics.service';
+import { MetricsResult } from './route-metrics.calculator';
 import { FindAnalyticsDto } from './dto/find-analytics.dto';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
@@ -323,7 +324,14 @@ export class AnalyticsService {
         ? await this.routeMetricsService.consolidate(routeId, idCompany)
         : await this.routeMetricsService.compute(routeId, idCompany);
 
-    const [orders, events, pings] = await Promise.all([
+    // As paradas ociosas não ficam gravadas na consolidação; são recalculadas
+    // aqui, só para a rota que está sendo aberta no mapa.
+    const computed =
+      route.status === 'completed'
+        ? await this.routeMetricsService.compute(routeId, idCompany)
+        : (metrics as MetricsResult | null);
+
+    const [orders, events, pings, company] = await Promise.all([
       this.orderRepository.find({
         where: { route_id: routeId, id_company: idCompany },
         relations: ['client'],
@@ -337,6 +345,10 @@ export class AnalyticsService {
         where: { route_id: routeId, id_company: idCompany },
         select: ['latitude', 'longitude', 'recorded_at'],
         order: { recorded_at: 'ASC' },
+      }),
+      this.companyRepository.findOne({
+        where: { id_company: idCompany },
+        select: ['id_company', 'depot_latitude', 'depot_longitude'],
       }),
     ]);
 
@@ -397,8 +409,22 @@ export class AnalyticsService {
           service_min: execution?.service_min ?? null,
           occurrence_type: final?.type === 'failed' ? (final.occurrence_type ?? 'other') : null,
           notes: final?.notes ?? null,
+          // Onde o entregador estava ao dar a baixa — pode não ser o endereço da parada.
+          recorded_latitude: final?.latitude ?? null,
+          recorded_longitude: final?.longitude ?? null,
         };
       }),
+      depot:
+        company?.depot_latitude != null && company?.depot_longitude != null
+          ? { latitude: company.depot_latitude, longitude: company.depot_longitude }
+          : null,
+      idle_stops: (computed?.idle_stops ?? []).map((parada) => ({
+        latitude: parada.latitude,
+        longitude: parada.longitude,
+        started_at: toIso(parada.started_at),
+        ended_at: toIso(parada.ended_at),
+        duration_min: Math.round(parada.duration_ms / 60000),
+      })),
       path: pings
         .filter((_, index) => index % passo === 0 || index === pings.length - 1)
         .map((ping) => ({
@@ -407,6 +433,75 @@ export class AnalyticsService {
           recorded_at: toIso(ping.recorded_at),
         })),
     };
+  }
+
+  /**
+   * Rotas em andamento agora, com a última posição conhecida de cada uma.
+   *
+   * "Agora" tem o atraso do envio: o aplicativo manda o rastro em lotes, então
+   * a posição pode ter até cerca de um minuto — `recorded_at` diz de quando é.
+   */
+  async live() {
+    const idCompany = this.tenantContext.getIdCompany();
+
+    const routes = await this.routeRepository.find({
+      where: { id_company: idCompany, status: 'active' },
+      relations: ['driver', 'vehicle'],
+      order: { started_at: 'ASC' },
+    });
+    if (routes.length === 0) return [];
+
+    const routeIds = routes.map((route) => route.route_id);
+    const [orders, lastPings] = await Promise.all([
+      this.orderRepository.find({
+        where: { route_id: In(routeIds), id_company: idCompany },
+        relations: ['client'],
+        order: { stop_sequence: 'ASC' },
+      }),
+      // Uma consulta por rota: são poucas rotas em andamento ao mesmo tempo, e
+      // "o último ponto de cada grupo" não tem forma portátil entre os bancos.
+      Promise.all(
+        routeIds.map((routeId) =>
+          this.pingRepository.findOne({
+            where: { route_id: routeId, id_company: idCompany },
+            order: { recorded_at: 'DESC' },
+          }),
+        ),
+      ),
+    ]);
+
+    return routes.map((route, index) => {
+      const stops = orders.filter((order) => order.route_id === route.route_id);
+      const next = stops.find((order) => order.status !== 'delivered' && order.status !== 'failed');
+      const ping = lastPings[index];
+
+      return {
+        route_id: route.route_id,
+        driver_name: route.driver?.name ?? null,
+        vehicle_name: route.vehicle?.plate || route.vehicle?.name || null,
+        region: route.region ?? null,
+        started_at: toIso(route.started_at),
+        stops_total: stops.length,
+        stops_delivered: stops.filter((order) => order.status === 'delivered').length,
+        stops_failed: stops.filter((order) => order.status === 'failed').length,
+        next_stop: next
+          ? {
+              order_id: next.order_id,
+              sequence: next.stop_sequence ?? null,
+              label: next.client?.trade_name || next.client?.name || next.title,
+              address: `${next.delivery_street}, ${next.delivery_number} — ${next.delivery_district}`,
+            }
+          : null,
+        position: ping
+          ? {
+              latitude: ping.latitude,
+              longitude: ping.longitude,
+              speed_mps: ping.speed_mps ?? null,
+              recorded_at: toIso(ping.recorded_at),
+            }
+          : null,
+      };
+    });
   }
 
   // ------------------------------------------------------------------ apoio

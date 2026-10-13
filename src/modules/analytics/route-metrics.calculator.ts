@@ -78,6 +78,8 @@ export interface MetricsResult {
   avg_delay_min: number | null;
   ping_count: number;
   stops: StopExecution[];
+  /** Onde o veículo parou fora de uma entrega. Não é gravado: serve ao mapa do percurso. */
+  idle_stops: IdleStop[];
 }
 
 const EARTH_RADIUS_M = 6371000;
@@ -136,18 +138,29 @@ export function traveledDistanceMeters(pings: MetricsPingInput[]): number | null
   return Math.round(total);
 }
 
+/** Um trecho em que o veículo ficou parado fora de uma parada de entrega. */
+export interface IdleStop {
+  latitude: number;
+  longitude: number;
+  started_at: Date;
+  ended_at: Date;
+  /** Tempo parado, já descontado o que coincidiu com um atendimento. */
+  duration_ms: number;
+}
+
 /**
- * Tempo parado fora das paradas de entrega: o veículo ficou no mesmo ponto
- * por mais de `MIN_IDLE_MS` sem que houvesse um atendimento em curso.
+ * Onde e por quanto tempo o veículo ficou parado fora das paradas de
+ * entrega: permaneceu no mesmo ponto por mais de `MIN_IDLE_MS` sem que
+ * houvesse um atendimento em curso.
  */
-export function idleTimeMs(
+export function idleStops(
   pings: MetricsPingInput[],
   serviceWindows: Array<{ start: number; end: number }>,
-): number | null {
+): IdleStop[] {
   const pontos = usablePings(pings);
-  if (pontos.length < 2) return null;
+  if (pontos.length < 2) return [];
 
-  let total = 0;
+  const paradas: IdleStop[] = [];
   let inicio = pontos[0];
   let anterior = pontos[0];
 
@@ -161,7 +174,17 @@ export function idleTimeMs(
       return soma + Math.max(0, sobreposicao);
     }, 0);
 
-    total += Math.max(0, ate - de - emAtendimento);
+    const duracao = Math.max(0, ate - de - emAtendimento);
+    // Sobrou menos que o mínimo: a parada era, na prática, o atendimento.
+    if (duracao < MIN_IDLE_MS) return;
+
+    paradas.push({
+      latitude: inicio.latitude,
+      longitude: inicio.longitude,
+      started_at: inicio.recorded_at,
+      ended_at: anterior.recorded_at,
+      duration_ms: duracao,
+    });
   };
 
   for (const ponto of pontos.slice(1)) {
@@ -177,7 +200,16 @@ export function idleTimeMs(
   }
   fechar();
 
-  return total;
+  return paradas;
+}
+
+/** Soma do tempo parado fora das paradas de entrega; null sem rastro suficiente. */
+export function idleTimeMs(
+  pings: MetricsPingInput[],
+  serviceWindows: Array<{ start: number; end: number }>,
+): number | null {
+  if (usablePings(pings).length < 2) return null;
+  return idleStops(pings, serviceWindows).reduce((soma, parada) => soma + parada.duration_ms, 0);
 }
 
 const minutes = (ms: number) => Math.round((ms / 60000) * 10) / 10;
@@ -265,6 +297,7 @@ export function computeRouteMetrics(input: MetricsInput): MetricsResult {
     .map((item) => item.window)
     .filter((janela): janela is { start: number; end: number } => !!janela);
   const ocioso = idleTimeMs(input.pings, janelas);
+  const paradasOciosas = idleStops(input.pings, janelas);
 
   return {
     planned_distance_m: input.planned_distance_m,
@@ -287,5 +320,6 @@ export function computeRouteMetrics(input: MetricsInput): MetricsResult {
     ),
     ping_count: usablePings(input.pings).length,
     stops,
+    idle_stops: paradasOciosas,
   };
 }

@@ -44,6 +44,15 @@ export class AnalyticsController {
     return this.analyticsService.routes(query);
   }
 
+  @Get('live')
+  @ApiOperation({
+    summary: 'Rotas em andamento, com a última posição conhecida de cada uma',
+    description: 'A posição tem o atraso do envio em lotes pelo aplicativo; recorded_at diz de quando é.',
+  })
+  live() {
+    return this.analyticsService.live();
+  }
+
   @Get('routes/:id/comparison')
   @ApiOperation({ summary: 'Planejado × executado de uma rota, parada a parada' })
   @ApiResponse({ status: 404, description: 'Rota não encontrada' })

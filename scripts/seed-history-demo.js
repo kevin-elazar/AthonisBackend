@@ -11,6 +11,7 @@
  * Uso:
  *   node scripts/seed-history-demo.js              # 6 rotas, 2 motoristas de demonstração
  *   node scripts/seed-history-demo.js --rotas 12
+ *   node scripts/seed-history-demo.js --ao-vivo    # uma rota em andamento agora, para a tela de acompanhamento
  *   node scripts/seed-history-demo.js --limpar     # apaga o que este script criou
  *
  * A consolidação (route_execution_metrics) não é gravada aqui: o painel a
@@ -140,8 +141,11 @@ async function clean() {
 
 // ------------------------------------------------------------------ geração
 
-async function createRoute({ idCompany, driver, vehicleId, offset, index, random }) {
-  const { day, startMs } = dayStartMs(offset);
+async function createRoute({ idCompany, driver, vehicleId, offset, random, live = false }) {
+  // Rota ao vivo: saiu há 50 minutos e ainda está na rua.
+  const { day, startMs } = live
+    ? { day: dayStartMs(0).day, startMs: Date.now() - 50 * 60_000 }
+    : dayStartMs(offset);
   const count = 4 + Math.floor(random() * 3);
   const first = Math.floor(random() * STOPS.length);
   const planned = Array.from({ length: count }, (_, i) => STOPS[(first + i * 3) % STOPS.length]).filter(
@@ -244,7 +248,7 @@ async function createRoute({ idCompany, driver, vehicleId, offset, index, random
 
   const pings = [];
   const events = [];
-  let now = startMs + Math.floor(random() * 15) * 60_000;
+  let now = live ? startMs : startMs + Math.floor(random() * 15) * 60_000;
   let position = DEPOT;
   const startedAt = now;
   events.push({ type: 'route_started', order: null, at: now });
@@ -294,26 +298,40 @@ async function createRoute({ idCompany, driver, vehicleId, offset, index, random
     if (random() < 0.15) {
       const [occurrence, notes] = OCCURRENCES[Math.floor(random() * OCCURRENCES.length)];
       events.push({ type: 'failed', order: orderId, at: now, occurrence, notes });
-      await run(`UPDATE "order" SET status = 'failed' WHERE order_id = ?`, [orderId]);
     } else {
       events.push({ type: 'delivered', order: orderId, at: now });
-      await run(`UPDATE "order" SET status = 'delivered', delivered_at = ? WHERE order_id = ?`, [
-        sqlDate(now),
-        orderId,
-      ]);
     }
   }
 
   drive(DEPOT);
   events.push({ type: 'route_finished', order: null, at: now });
 
-  await run('UPDATE route SET started_at = ?, finished_at = ? WHERE route_id = ?', [
+  // Ao vivo, só existe o que já aconteceu até este instante.
+  const agora = Date.now();
+  const happened = live ? events.filter((event) => event.at <= agora) : events;
+  const recorded = live ? pings.filter((ping) => ping.at <= agora) : pings;
+  const finished = happened.some((event) => event.type === 'route_finished');
+
+  for (const event of happened) {
+    if (event.type === 'failed') {
+      await run(`UPDATE "order" SET status = 'failed' WHERE order_id = ?`, [event.order]);
+    }
+    if (event.type === 'delivered') {
+      await run(`UPDATE "order" SET status = 'delivered', delivered_at = ? WHERE order_id = ?`, [
+        sqlDate(event.at),
+        event.order,
+      ]);
+    }
+  }
+
+  await run('UPDATE route SET status = ?, started_at = ?, finished_at = ? WHERE route_id = ?', [
+    finished ? 'completed' : 'active',
     sqlDate(startedAt),
-    sqlDate(now),
+    finished ? sqlDate(now) : null,
     routeId,
   ]);
 
-  for (const event of events) {
+  for (const event of happened) {
     await run(
       `INSERT INTO route_event
          (id_company, route_id, order_id, driver_id, type, occurrence_type, notes, occurred_at, received_at, client_event_id)
@@ -334,7 +352,7 @@ async function createRoute({ idCompany, driver, vehicleId, offset, index, random
   }
 
   await run('BEGIN');
-  for (const ping of pings) {
+  for (const ping of recorded) {
     await run(
       `INSERT INTO route_location_ping
          (id_company, route_id, latitude, longitude, accuracy_m, speed_mps, recorded_at, received_at, client_ping_id)
@@ -344,11 +362,12 @@ async function createRoute({ idCompany, driver, vehicleId, offset, index, random
   }
   await run('COMMIT');
 
-  const failed = events.filter((event) => event.type === 'failed').length;
+  const failed = happened.filter((event) => event.type === 'failed').length;
   console.log(
     `  Rota #${routeId} · ${day} · ${driver.name} · ${planned.length} paradas` +
       (failed ? ` · ${failed} não entregue(s)` : '') +
-      ` · ${pings.length} pontos de GPS`,
+      ` · ${recorded.length} pontos de GPS` +
+      (live ? ' · EM ANDAMENTO' : ''),
   );
 }
 
@@ -389,6 +408,20 @@ async function main() {
   const existing = await get('SELECT COUNT(*) AS total FROM route WHERE created_by = ?', [AUTHOR]);
   const random = createRandom(20261012 + existing.total);
 
+  if (args['ao-vivo']) {
+    console.log(`Empresa ${idCompany}: criando uma rota em andamento\n`);
+    await createRoute({
+      idCompany,
+      driver: drivers[existing.total % drivers.length],
+      vehicleId: vehicle?.vehicle_id ?? null,
+      offset: 0,
+      random,
+      live: true,
+    });
+    console.log('\nAbra Acompanhamento no sistema web. A posição não avança sozinha: é uma foto deste instante.');
+    return;
+  }
+
   console.log(`Empresa ${idCompany}: criando ${total} rota(s) executada(s) de demonstração\n`);
   for (let index = 0; index < total; index += 1) {
     await createRoute({
@@ -397,7 +430,6 @@ async function main() {
       vehicleId: vehicle?.vehicle_id ?? null,
       // Duas rotas por dia, do dia anterior para trás.
       offset: 1 + Math.floor((existing.total + index) / drivers.length),
-      index,
       random,
     });
   }
