@@ -5,6 +5,7 @@ import {
   Delete,
   Param,
   Query,
+  Body,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
@@ -12,6 +13,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { RoutesService } from '../services/routes.service';
 import { FindRouteDto } from '../dto/find-route.dto';
+import { DuplicateRouteDto } from '../dto/duplicate-route.dto';
 
 /**
  * Rotas de entrega.
@@ -93,6 +95,19 @@ export class RoutesController {
   @ApiResponse({ status: 400, description: 'A rota já foi concluída' })
   async cancel(@Param('id', ParseIntPipe) id: number) {
     return this.routesService.cancel(id);
+  }
+
+  @Post(':id/duplicate')
+  @ApiOperation({
+    summary: 'Duplica uma rota cancelada',
+    description:
+      'Cria uma rota planejada com as paradas que a rota cancelada ainda devia, na mesma ordem. ' +
+      'Entram só os pedidos que continuam livres na fila. Sem corpo, sai para hoje com o mesmo motorista e veículo.',
+  })
+  @ApiResponse({ status: 201, description: 'Rota nova, já com as paradas' })
+  @ApiResponse({ status: 400, description: 'A rota não está cancelada ou não há paradas livres para duplicar' })
+  async duplicate(@Param('id', ParseIntPipe) id: number, @Body() dto: DuplicateRouteDto) {
+    return this.routesService.duplicate(id, dto);
   }
 
   @Delete(':id')

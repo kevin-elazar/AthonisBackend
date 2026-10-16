@@ -8,6 +8,8 @@ import { Order } from '@/shared/entities/order.entity';
 import { Driver } from '@/shared/entities/driver.entity';
 import { Vehicle } from '@/shared/entities/vehicle.entity';
 import { RouteEvent } from '@/shared/entities/route-event.entity';
+import { RouteReturnedStop } from '@/shared/entities/route-returned-stop.entity';
+import { Company } from '@/shared/entities/company.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
 
 /**
@@ -43,6 +45,7 @@ describe('RoutesService', () => {
         escritas.push({ entidade, criterio, dados });
         return { affected: 1 };
       }),
+      insert: jest.fn(async () => ({ identifiers: [] })),
       delete: jest.fn(async (entidade: unknown, criterio: unknown) => {
         escritas.push({ entidade, criterio, dados: { __delete: true } });
         return { affected: 1 };
@@ -69,6 +72,11 @@ describe('RoutesService', () => {
           provide: getRepositoryToken(RouteEvent),
           useValue: { find: jest.fn().mockResolvedValue([]) },
         },
+        {
+          provide: getRepositoryToken(RouteReturnedStop),
+          useValue: { find: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+        },
+        { provide: getRepositoryToken(Company), useValue: { findOne: jest.fn().mockResolvedValue(null) } },
         {
           provide: DataSource,
           useValue: {

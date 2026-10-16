@@ -74,6 +74,10 @@ export class Route {
   @Column({ type: 'boolean', default: false })
   simulated: boolean;
 
+  /** Rota cancelada da qual esta foi duplicada, para levar a entrega adiante. */
+  @Column({ type: 'int', nullable: true })
+  duplicated_from_route_id?: number;
+
   /** Região de referência, para a pessoa reconhecer a rota na lista. */
   @Column({ type: 'varchar', length: 100, nullable: true })
   region?: string;

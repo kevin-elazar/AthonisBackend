@@ -190,6 +190,60 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       expect(motorista!.status).toBe('available');
     });
 
+    it('a rota cancelada pode ser duplicada com as paradas que ficaram em aberto', async () => {
+      const { route, orders, base } = await novaRota(4);
+      await post(`${base}/start`, evento(0)).expect(200);
+      await post(`${base}/stops/${orders[1].order_id}/deliver`, evento(10)).expect(200);
+      await post(`${base}/cancel`, evento(20, { reason: 'Problema mecânico no veículo' })).expect(200);
+
+      const admin = (path: string, body: object = {}) =>
+        http().post(path).set('Authorization', `Bearer ${adminToken}`).send(body);
+
+      const lista = await http().get('/routes').set('Authorization', `Bearer ${adminToken}`).expect(200);
+      expect(
+        lista.body.find((item: { route_id: number }) => item.route_id === route.route_id),
+      ).toMatchObject({ status: 'cancelled', returned_stop_count: 3 });
+
+      const nova = await admin(`/routes/${route.route_id}/duplicate`).expect(201);
+
+      // As três em aberto, na ordem original e renumeradas; a entregue fica na rota antiga.
+      expect(nova.body).toMatchObject({
+        status: 'planned',
+        driver_id: driverId,
+        duplicated_from_route_id: route.route_id,
+        // A original tinha 4 paradas; a nova, 3. A distância planejada não serve mais.
+        total_distance_m: null,
+      });
+      expect(nova.body.orders.map((order: { order_id: number }) => order.order_id)).toEqual([
+        orders[0].order_id,
+        orders[2].order_id,
+        orders[3].order_id,
+      ]);
+      expect(nova.body.orders.map((order: { stop_sequence: number }) => order.stop_sequence)).toEqual([1, 2, 3]);
+
+      // O motorista enxerga a rota nova no aplicativo.
+      const doDia = await http().get('/driver/routes').set('Authorization', `Bearer ${token}`).expect(200);
+      expect(doDia.body.map((item: { route_id: number }) => item.route_id)).toContain(nova.body.route_id);
+
+      // As paradas já foram usadas: duplicar de novo não tem o que levar.
+      await admin(`/routes/${route.route_id}/duplicate`).expect(400);
+    });
+
+    it('não duplica rota que não está cancelada, e o aplicativo não duplica', async () => {
+      const { route } = await novaRota(1);
+
+      await http()
+        .post(`/routes/${route.route_id}/duplicate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({})
+        .expect(400);
+      await http()
+        .post(`/routes/${route.route_id}/duplicate`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({})
+        .expect(403);
+    });
+
     it('exige o motivo e só cancela rota em andamento', async () => {
       const planejada = await novaRota(1);
       await post(`${planejada.base}/cancel`, evento(0)).expect(400);
