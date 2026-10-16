@@ -26,7 +26,12 @@ import { plannedArrivalsByOrder } from '../../../shared/domain/planned-arrivals'
 import { todayInTimeZone } from '../../../shared/domain/timezone';
 import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 import { RoutesService } from '../../routes/services/routes.service';
-import { DeliverStopDto, DriverEventDto, FailStopDto } from '../dto/driver-event.dto';
+import {
+  CancelRouteDto,
+  DeliverStopDto,
+  DriverEventDto,
+  FailStopDto,
+} from '../dto/driver-event.dto';
 import { LocationBatchDto } from '../dto/location-batch.dto';
 import { RouteMetricsService } from '../../analytics/route-metrics.service';
 
@@ -290,6 +295,37 @@ export class DriverRoutesService {
 
     await this.recordEvent(route, 'route_finished', dto, occurredAt);
     await this.consolidate(route);
+    return this.findOne(routeId);
+  }
+
+  /**
+   * Cancela uma rota em andamento.
+   *
+   * Faz o mesmo que o "cancelar" do escritório: as paradas ainda abertas
+   * voltam para a fila de pedidos, para serem roteirizadas de novo, e o
+   * motorista e o veículo são liberados. O que já foi entregue ou teve
+   * ocorrência continua registrado na rota. O motivo é obrigatório e fica
+   * gravado no evento de cancelamento.
+   */
+  async cancel(routeId: number, dto: CancelRouteDto): Promise<DriverRouteView> {
+    if (await this.alreadyProcessed(dto.client_event_id)) {
+      return this.findOne(routeId);
+    }
+
+    const route = await this.findOwnRoute(routeId);
+    const occurredAt = this.occurredAt(dto);
+
+    if (route.status === 'active') {
+      await this.routesService.cancel(routeId);
+    } else if (route.status !== 'cancelled') {
+      // Rota já cancelada passa direto: o escritório cancelou pelo sistema web
+      // e o aplicativo só está registrando o lado dele.
+      throw new ConflictException(
+        `Esta rota está como "${route.status}". Só é possível cancelar uma rota em andamento.`,
+      );
+    }
+
+    await this.recordEvent(route, 'route_cancelled', dto, occurredAt, { notes: dto.reason.trim() });
     return this.findOne(routeId);
   }
 

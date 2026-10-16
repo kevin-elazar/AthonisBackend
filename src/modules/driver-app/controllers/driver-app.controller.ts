@@ -16,7 +16,12 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { AllowDriver } from '../../auth/decorators/allow-driver.decorator';
 import { DriverRoutesService } from '../services/driver-routes.service';
 import { FindDriverRoutesDto } from '../dto/find-driver-routes.dto';
-import { DeliverStopDto, DriverEventDto, FailStopDto } from '../dto/driver-event.dto';
+import {
+  CancelRouteDto,
+  DeliverStopDto,
+  DriverEventDto,
+  FailStopDto,
+} from '../dto/driver-event.dto';
 import { LocationBatchDto } from '../dto/location-batch.dto';
 
 /**
@@ -113,6 +118,18 @@ export class DriverAppController {
   @ApiResponse({ status: 400, description: 'Há paradas sem baixa (errors lista quais)' })
   finish(@Param('id', ParseIntPipe) id: number, @Body() dto: DriverEventDto) {
     return this.driverRoutesService.finish(id, dto);
+  }
+
+  @Post('routes/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancela a rota em andamento',
+    description:
+      'As paradas ainda abertas voltam para a fila de pedidos e o motorista e o veículo são liberados. O motivo é obrigatório.',
+  })
+  @ApiResponse({ status: 409, description: 'A rota não está em andamento' })
+  cancel(@Param('id', ParseIntPipe) id: number, @Body() dto: CancelRouteDto) {
+    return this.driverRoutesService.cancel(id, dto);
   }
 
   @Post('routes/:id/locations')

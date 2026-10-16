@@ -61,6 +61,17 @@ export class DeliverStopDto extends DriverEventDto {
   notes?: string;
 }
 
+/** Cancelamento de uma rota em andamento pelo entregador. */
+export class CancelRouteDto extends DriverEventDto {
+  @ApiProperty({
+    description: 'Motivo do cancelamento. Fica registrado para o escritório saber por que a rota parou.',
+    example: 'Veículo com problema mecânico',
+  })
+  @IsString()
+  @Length(3, 500, { message: 'Informe o motivo do cancelamento (de 3 a 500 caracteres)' })
+  reason: string;
+}
+
 export class FailStopDto extends DriverEventDto {
   @ApiProperty({ description: 'Motivo da não entrega', enum: OCCURRENCE_TYPES })
   @IsIn(OCCURRENCE_TYPES, {

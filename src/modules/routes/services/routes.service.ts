@@ -29,7 +29,11 @@ export type RouteStopOrder = Order & {
 };
 
 /** Uma rota com os pedidos já na ordem das paradas. */
-export type RouteWithStops = Route & { orders: RouteStopOrder[] };
+export type RouteWithStops = Route & {
+  orders: RouteStopOrder[];
+  /** Motivo informado pelo entregador ao cancelar a rota pelo aplicativo. */
+  cancel_reason?: string | null;
+};
 
 @Injectable()
 export class RoutesService {
@@ -103,13 +107,15 @@ export class RoutesService {
       where: {
         route_id: In(routes.map((r) => r.route_id)),
         id_company: idCompany,
-        type: In(['delivered', 'failed']),
+        type: In(['delivered', 'failed', 'route_cancelled']),
       },
       order: { occurred_at: 'ASC' },
     });
     const ultimoPorPedido = new Map<number, RouteEvent>();
+    const motivoCancelamento = new Map<number, string | null>();
     for (const event of encerramentos) {
-      if (event.order_id) ultimoPorPedido.set(event.order_id, event);
+      if (event.type === 'route_cancelled') motivoCancelamento.set(event.route_id, event.notes ?? null);
+      else if (event.order_id) ultimoPorPedido.set(event.order_id, event);
     }
 
     const porRota = new Map<number, RouteStopOrder[]>();
@@ -128,6 +134,7 @@ export class RoutesService {
     return routes.map((route) => ({
       ...route,
       orders: porRota.get(route.route_id) ?? [],
+      cancel_reason: motivoCancelamento.get(route.route_id) ?? null,
     })) as RouteWithStops[];
   }
 

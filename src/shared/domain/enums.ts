@@ -71,6 +71,7 @@ export const ROUTE_EVENT_TYPES = [
   'delivered',
   'failed',
   'route_finished',
+  'route_cancelled',
 ] as const;
 export type RouteEventType = (typeof ROUTE_EVENT_TYPES)[number];
 

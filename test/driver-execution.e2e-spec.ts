@@ -159,6 +159,59 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
     await post(`${a.base}/stops/${b.orders[0].order_id}/deliver`, evento(5)).expect(404);
   });
 
+  describe('cancelamento pelo entregador', () => {
+    it('cancela a rota em andamento, devolve as paradas abertas e guarda o motivo', async () => {
+      const { route, orders, base } = await novaRota(3);
+      await post(`${base}/start`, evento(0)).expect(200);
+      await post(`${base}/stops/${orders[0].order_id}/deliver`, evento(10)).expect(200);
+
+      const res = await post(`${base}/cancel`, evento(20, { reason: 'Veículo com pneu furado' })).expect(200);
+
+      expect(res.body.status).toBe('cancelled');
+
+      // A entrega feita continua na rota; as paradas abertas voltam para a fila.
+      const pedidos = await dataSource.getRepository(Order).find({
+        where: orders.map((order) => ({ order_id: order.order_id })),
+        order: { order_id: 'ASC' },
+      });
+      expect(pedidos.map((pedido) => [pedido.status, pedido.route_id])).toEqual([
+        ['delivered', route.route_id],
+        ['pending', null],
+        ['pending', null],
+      ]);
+
+      const eventos = await dataSource.query(
+        "SELECT notes FROM route_event WHERE route_id = ? AND type = 'route_cancelled'",
+        [route.route_id],
+      );
+      expect(eventos).toEqual([{ notes: 'Veículo com pneu furado' }]);
+
+      const motorista = await dataSource.getRepository(Driver).findOneBy({ driver_id: driverId });
+      expect(motorista!.status).toBe('available');
+    });
+
+    it('exige o motivo e só cancela rota em andamento', async () => {
+      const planejada = await novaRota(1);
+      await post(`${planejada.base}/cancel`, evento(0)).expect(400);
+      await post(`${planejada.base}/cancel`, evento(0, { reason: 'Sem motivo real' })).expect(409);
+    });
+
+    it('reenviar o cancelamento não falha nem registra de novo', async () => {
+      const { route, base } = await novaRota(1);
+      await post(`${base}/start`, evento(0)).expect(200);
+      const body = evento(5, { reason: 'Acidente no trajeto' });
+
+      await post(`${base}/cancel`, body).expect(200);
+      await post(`${base}/cancel`, body).expect(200);
+
+      const total = await dataSource.query(
+        "SELECT COUNT(*) AS total FROM route_event WHERE route_id = ? AND type = 'route_cancelled'",
+        [route.route_id],
+      );
+      expect(Number(total[0].total)).toBe(1);
+    });
+  });
+
   describe('fila offline: tudo chega depois, e mais de uma vez', () => {
     it('reenviar a fila inteira não duplica nem muda nada', async () => {
       const { route, orders, base } = await novaRota(2);
