@@ -6,7 +6,7 @@
 #
 # O que cria (idempotente: rodar de novo não duplica):
 #   - resource group athonis-rg
-#   - VM Ubuntu 24.04 B2s com IP público estático, só portas 80/443 abertas
+#   - VM Ubuntu 24.04 B2als_v2 (2 vCPU, 4 GB) no Chile Central com IP público estático, só portas 80/443 abertas
 #     (sem porta 22: ninguém entra por SSH; o deploy usa `az vm run-command`)
 #   - identidade gerenciada "athonis-github" com federated credentials para os
 #     ambientes staging/production dos repositórios no GitHub (login OIDC no
@@ -17,14 +17,16 @@
 set -euo pipefail
 
 RG="${RG:-athonis-rg}"
-LOCATION="${LOCATION:-brazilsouth}"
+LOCATION="${LOCATION:-chilecentral}"  # Azure for Students não libera brazilsouth
 VM="${VM:-athonis-vm}"
-SIZE="${SIZE:-Standard_B2s}"
+SIZE="${SIZE:-Standard_B2als_v2}"  # B2s não existe no chilecentral
 IDENTITY="${IDENTITY:-athonis-github}"
 GITHUB_OWNER="${GITHUB_OWNER:-kevin-elazar}"
 REPOS="${REPOS:-AthonisBackend athonis-front-end}"
 BUDGET="${BUDGET:-80}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
+# No Git Bash do Windows o az (Python nativo) precisa de caminho Windows.
+winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi; }
 
 passo() { printf '\n==> %s\n' "$*"; }
 
@@ -43,7 +45,7 @@ if ! az vm show -g "$RG" -n "$VM" -o none 2>/dev/null; then
     --public-ip-sku Standard --public-ip-address-allocation static \
     --nsg-rule NONE \
     --os-disk-size-gb 32 \
-    --custom-data "$DIR/cloud-init.yaml" -o none
+    --custom-data "$(winpath "$DIR/cloud-init.yaml")" -o none
 else
   passo "VM $VM já existe"
 fi
@@ -86,7 +88,7 @@ az vm run-command invoke -g "$RG" -n "$VM" --command-id RunShellScript \
 
 passo "Gerando a configuração com segredos dentro da VM"
 az vm run-command invoke -g "$RG" -n "$VM" --command-id RunShellScript \
-  --scripts "@$DIR/vm-configure.sh" --parameters "$BASE_DOMAIN" \
+  --scripts "@$(winpath "$DIR/vm-configure.sh")" --parameters "$BASE_DOMAIN" \
   --query 'value[0].message' -o tsv
 
 passo "Alerta de orçamento de US\$ $BUDGET"
