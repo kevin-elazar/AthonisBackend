@@ -534,7 +534,14 @@ export class OrderImportsService {
   async getRejectedFilePath(filename: string): Promise<string> {
     try {
       // Um nome válido é sempre um único componente de caminho.
-      if (!filename || filename !== path.basename(filename) || filename.includes('..')) {
+      // As duas barras são recusadas em qualquer sistema: no Linux (produção)
+      // a contrabarra não separa pastas, e o path.basename não a pegaria.
+      if (
+        !filename ||
+        filename !== path.basename(filename) ||
+        filename.includes('..') ||
+        /[\\/]/.test(filename)
+      ) {
         throw new BadRequestException('Nome de arquivo inválido');
       }
 
