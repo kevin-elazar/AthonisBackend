@@ -262,7 +262,7 @@ export class OrderImportsService {
 
     return new Promise((resolve, reject) => {
       const rows: any[] = [];
-      let processing = false;
+      const processing = false;
       let ended = false;
 
       const stream = createReadStream(filePath)

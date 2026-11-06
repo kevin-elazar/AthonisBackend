@@ -10,7 +10,7 @@
     "test:cov": "jest -c jest.coverage.config.js --coverage --runInBand",
     "test:e2e": "jest --config ./jest-e2e.json",
     "test:all": "jest --config ./jest.config.js && jest --config ./jest-e2e.json",
-    "format": "prettier --write \"src/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "npm run build && node dist/main",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -20,7 +20,8 @@
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:e2e:pg": "cross-env TEST_DB=postgres jest --config ./jest-e2e.json --runInBand"
+    "test:e2e:pg": "cross-env TEST_DB=postgres jest --config ./jest-e2e.json --runInBand",
+    "lint": "eslint src test scripts"
   },
   "keywords": [],
   "author": "Kevin Chedid El Azar",
@@ -60,6 +61,7 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@nestjs/cli": "^11.0.5",
     "@nestjs/testing": "^11.0.0",
     "@types/bcrypt": "^6.0.0",
@@ -78,12 +80,17 @@
     "@types/serve-static": "^1.15.7",
     "@types/supertest": "^6.0.2",
     "cross-env": "^10.1.0",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.14.0",
     "jest": "^29.7.0",
+    "prettier": "^3.9.10",
     "rimraf": "^6.0.1",
     "sqlite3": "^6.0.1",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.72.1"
   }
 }

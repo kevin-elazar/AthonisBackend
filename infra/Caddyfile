@@ -1,0 +1,48 @@
+# Proxy reverso com HTTPS automático (Let's Encrypt).
+# BASE_DOMAIN vem do .env: por exemplo 20-51-10-7.sslip.io (o sslip.io
+# resolve o próprio IP, sem precisar comprar domínio) ou um domínio próprio.
+{
+	email {$ACME_EMAIL}
+}
+
+(seguranca) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+(api) {
+	import seguranca
+	# /metrics só é lido pelo Prometheus, pela rede interna do Docker.
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
+}
+
+api.{$BASE_DOMAIN} {
+	import api
+	reverse_proxy api:8080
+}
+
+staging-api.{$BASE_DOMAIN} {
+	import api
+	reverse_proxy api-staging:8080
+}
+
+app.{$BASE_DOMAIN} {
+	import seguranca
+	reverse_proxy web:3000
+}
+
+staging-app.{$BASE_DOMAIN} {
+	import seguranca
+	reverse_proxy web-staging:3000
+}
+
+grafana.{$BASE_DOMAIN} {
+	import seguranca
+	reverse_proxy grafana:3000
+}

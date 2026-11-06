@@ -30,5 +30,4 @@ credentials/
 
 # infra local
 infra/.env
-infra/secrets/
 backups/

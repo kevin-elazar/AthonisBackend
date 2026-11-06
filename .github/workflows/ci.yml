@@ -1,0 +1,131 @@
+# Integração contínua da API do Athonis.
+#
+# Em todo push e pull request: lint, typecheck, build, testes unitários + e2e
+# contra um PostgreSQL de verdade (com limite mínimo de cobertura) e análise
+# no SonarCloud. Em push nas branches principais, publica a imagem Docker no
+# GitHub Container Registry; o deploy (deploy.yml) parte dessa imagem.
+name: CI
+
+on:
+  push:
+    branches: [master, desenvMobile]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  qualidade:
+    name: Lint, typecheck e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+
+  testes:
+    name: Testes (unitários + e2e em PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: athonis
+          POSTGRES_PASSWORD: athonis
+          POSTGRES_DB: athonis_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U athonis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DB: postgres
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: athonis
+      DB_PASSWORD: athonis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Testes com cobertura (falha abaixo do limite)
+        run: npm run test:cov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  sonarcloud:
+    name: SonarCloud
+    needs: testes
+    runs-on: ubuntu-latest
+    # Fork não recebe o token; sem token o passo é pulado em vez de falhar.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+      - name: Análise
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: Aviso de configuração
+        if: ${{ env.SONAR_TOKEN == '' }}
+        run: echo "::warning::SONAR_TOKEN não configurado; análise do SonarCloud pulada."
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  imagem:
+    name: Imagem Docker (GHCR)
+    needs: [qualidade, testes]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/athonis-api
+          tags: |
+            type=sha,format=long
+            type=raw,value=staging,enable=${{ github.ref == 'refs/heads/desenvMobile' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/master' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

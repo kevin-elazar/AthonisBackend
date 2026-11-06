@@ -48,10 +48,11 @@ const run = (sql, params) => db.run(sql, params);
 const all = (sql, params) => db.all(sql, params);
 const get = (sql, params) => db.get(sql, params);
 
+/** Erro de uso (parâmetro faltando, id repetido): mostra só a mensagem. */
+class FalhaEsperada extends Error {}
+
 function fail(message) {
-  console.error(`\nErro: ${message}\n`);
-  Promise.resolve(db && db.close()).finally(() => process.exit(1));
-  throw new Error(message);
+  throw new FalhaEsperada(message);
 }
 
 async function listCompanies() {

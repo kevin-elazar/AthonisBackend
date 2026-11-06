@@ -1,0 +1,83 @@
+# Entrega contínua da API.
+#
+#   - CI verde na branch desenvMobile  -> atualiza o ambiente de STAGING
+#   - Release publicada (tag v*)        -> atualiza PRODUÇÃO com a imagem do commit da tag
+#   - Manual (workflow_dispatch)        -> escolhe ambiente e imagem
+#
+# Sem SSH: o GitHub entra no Azure por OIDC (federated credential, nenhuma
+# senha guardada) e pede à VM, pelo `az vm run-command`, que rode
+# infra/deploy.sh. O script baixa a imagem do GHCR, reinicia só o serviço e
+# espera o /health responder; se não responder, volta para a imagem anterior.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [desenvMobile]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: Ambiente
+        type: choice
+        options: [staging, production]
+        default: staging
+      imagem:
+        description: Tag da imagem (ex. sha-<commit>, staging, main)
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-api-${{ github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    environment:
+      name: ${{ github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+      url: ${{ (github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging') == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}
+    env:
+      AMBIENTE: ${{ github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+      IMAGEM: ${{ github.event.inputs.imagem || format('sha-{0}', github.event.workflow_run.head_sha || github.sha) }}
+    steps:
+      - name: Conferir configuração
+        run: |
+          for v in "${{ vars.AZURE_CLIENT_ID }}" "${{ vars.AZURE_TENANT_ID }}" "${{ vars.AZURE_SUBSCRIPTION_ID }}" "${{ vars.AZURE_RESOURCE_GROUP }}" "${{ vars.AZURE_VM_NAME }}"; do
+            if [ -z "$v" ]; then
+              echo "::error::Variáveis do Azure não configuradas (veja infra/README.md)."; exit 1
+            fi
+          done
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Atualizar a VM (${{ env.AMBIENTE }} <- ${{ env.IMAGEM }})
+        run: |
+          saida=$(az vm run-command invoke \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ vars.AZURE_VM_NAME }}" \
+            --command-id RunShellScript \
+            --scripts "/opt/athonis/infra/deploy.sh api $AMBIENTE $IMAGEM" \
+            --query 'value[0].message' -o tsv)
+          echo "$saida"
+          echo "$saida" | grep -q "DEPLOY_OK" || { echo "::error::A VM não confirmou o deploy."; exit 1; }
+
+      - name: Conferir /health de fora
+        run: |
+          url="${{ env.AMBIENTE == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}"
+          [ -z "$url" ] && { echo "::warning::URL do ambiente não configurada; pulando."; exit 0; }
+          for i in $(seq 1 20); do
+            curl -fsS "$url/health" && exit 0
+            sleep 6
+          done
+          echo "::error::$url/health não respondeu"; exit 1

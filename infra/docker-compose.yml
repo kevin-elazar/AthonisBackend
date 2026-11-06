@@ -1,0 +1,149 @@
+# Produção e staging do Athonis numa VM (Azure), com Docker Compose.
+#
+#   Caddy (HTTPS automático, Let's Encrypt)
+#     ├── api.<BASE_DOMAIN>          -> api            (produção)
+#     ├── app.<BASE_DOMAIN>          -> web            (produção)
+#     ├── staging-api.<BASE_DOMAIN>  -> api-staging
+#     ├── staging-app.<BASE_DOMAIN>  -> web-staging
+#     └── grafana.<BASE_DOMAIN>      -> grafana
+#   PostgreSQL (bancos athonis e athonis_staging, volume persistente)
+#   Prometheus (lê /metrics das duas APIs e o node-exporter) + Grafana
+#
+# As imagens vêm do GitHub Container Registry, publicadas pelo CI. As tags em
+# uso ficam no .env desta pasta e são trocadas por deploy.sh.
+name: athonis
+
+x-api: &api
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+  volumes:
+    - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
+  environment: &api-env
+    NODE_ENV: production
+    PORT: 8080
+    DB_TYPE: postgres
+    DB_HOST: postgres
+    DB_PORT: 5432
+    DB_USER: ${POSTGRES_USER:-athonis}
+    DB_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-service-account.json
+  networks: [interna]
+
+x-web: &web
+  restart: unless-stopped
+  networks: [interna]
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      BASE_DOMAIN: ${BASE_DOMAIN:?defina BASE_DOMAIN no .env}
+      ACME_EMAIL: ${ACME_EMAIL:-kevin.azal@catolicasc.edu.br}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [interna]
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-athonis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: athonis
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-staging-db.sql:/docker-entrypoint-initdb.d/10-staging.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-athonis}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [interna]
+
+  api:
+    <<: *api
+    image: ghcr.io/kevin-elazar/athonis-api:${API_TAG:-main}
+    env_file: [./env/api.production.env]
+    environment:
+      <<: *api-env
+      DB_NAME: athonis
+      SENTRY_ENVIRONMENT: production
+    volumes:
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
+      - uploads_prod:/app/importacoes
+
+  api-staging:
+    <<: *api
+    image: ghcr.io/kevin-elazar/athonis-api:${API_STAGING_TAG:-staging}
+    env_file: [./env/api.staging.env]
+    environment:
+      <<: *api-env
+      DB_NAME: athonis_staging
+      SENTRY_ENVIRONMENT: staging
+    volumes:
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
+      - uploads_staging:/app/importacoes
+
+  web:
+    <<: *web
+    image: ghcr.io/kevin-elazar/athonis-web:${WEB_TAG:-main}
+
+  web-staging:
+    <<: *web
+    image: ghcr.io/kevin-elazar/athonis-web:${WEB_STAGING_TAG:-staging}
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks: [interna]
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    networks: [interna]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD no .env}
+      GF_SERVER_ROOT_URL: https://grafana.${BASE_DOMAIN}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks: [interna]
+
+networks:
+  interna:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:
+  uploads_prod:
+  uploads_staging:
+  prometheus_data:
+  grafana_data:

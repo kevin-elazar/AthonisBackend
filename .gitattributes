@@ -1,0 +1,7 @@
+# Scripts e arquivos lidos dentro de containers Linux precisam de LF.
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Caddyfile text eol=lf
