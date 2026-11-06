@@ -1,6 +1,7 @@
 # Entrega contínua da API.
 #
 #   - CI verde na branch desenvMobile  -> atualiza o ambiente de STAGING
+#                                        (o job deploy-staging do ci.yml chama este workflow)
 #   - Release publicada (tag v*)        -> atualiza PRODUÇÃO com a imagem do commit da tag
 #   - Manual (workflow_dispatch)        -> escolhe ambiente e imagem
 #
@@ -11,10 +12,16 @@
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [desenvMobile]
+  # Chamado pelo ci.yml depois que a imagem é publicada. (Não usamos
+  # workflow_run porque ele só dispara para workflows da branch padrão.)
+  workflow_call:
+    inputs:
+      ambiente:
+        type: string
+        default: staging
+      imagem:
+        type: string
+        required: false
   release:
     types: [published]
   workflow_dispatch:
@@ -33,19 +40,18 @@ permissions:
   id-token: write
 
 concurrency:
-  group: deploy-api-${{ github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+  group: deploy-api-${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     environment:
-      name: ${{ github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
-      url: ${{ (github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging') == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}
+      name: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+      url: ${{ (inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging') == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}
     env:
-      AMBIENTE: ${{ github.event.inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
-      IMAGEM: ${{ github.event.inputs.imagem || format('sha-{0}', github.event.workflow_run.head_sha || github.sha) }}
+      AMBIENTE: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+      IMAGEM: ${{ inputs.imagem || format('sha-{0}', github.sha) }}
     steps:
       - name: Conferir configuração
         run: |
