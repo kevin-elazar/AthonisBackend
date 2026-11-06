@@ -25,7 +25,9 @@ GITHUB_OWNER="${GITHUB_OWNER:-kevin-elazar}"
 REPOS="${REPOS:-AthonisBackend athonis-front-end}"
 BUDGET="${BUDGET:-80}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
-# No Git Bash do Windows o az (Python nativo) precisa de caminho Windows.
+# No Git Bash do Windows: não converter IDs do Azure (/subscriptions/...) em
+# caminhos de arquivo, e passar caminho Windows ao az (Python nativo).
+export MSYS_NO_PATHCONV=1
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi; }
 
 passo() { printf '\n==> %s\n' "$*"; }
@@ -39,13 +41,19 @@ az group create -n "$RG" -l "$LOCATION" -o none
 
 if ! az vm show -g "$RG" -n "$VM" -o none 2>/dev/null; then
   passo "Criando a VM $VM ($SIZE)"
+  # O Azure exige uma chave SSH para VM Linux, mas a porta 22 fica fechada e
+  # ninguém entra por SSH: geramos uma chave descartável e jogamos fora.
+  # (--generate-ssh-keys falha no Windows com espaço no caminho do usuário.)
+  KEYDIR="$(mktemp -d)"
+  ssh-keygen -q -t rsa -b 4096 -N '' -C athonis-descartavel -f "$KEYDIR/id_rsa"
   az vm create -g "$RG" -n "$VM" \
     --image Ubuntu2404 --size "$SIZE" \
-    --admin-username athonis --generate-ssh-keys \
+    --admin-username athonis --ssh-key-values "$(winpath "$KEYDIR/id_rsa.pub")" \
     --public-ip-sku Standard --public-ip-address-allocation static \
     --nsg-rule NONE \
     --os-disk-size-gb 32 \
     --custom-data "$(winpath "$DIR/cloud-init.yaml")" -o none
+  rm -rf "$KEYDIR"
 else
   passo "VM $VM já existe"
 fi
