@@ -1,3 +1,4 @@
+import { rawQuery } from './helpers/db.helper';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
@@ -102,7 +103,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
     const motorista = await dataSource.getRepository(Driver).findOneBy({ driver_id: driverId });
     expect(motorista!.status).toBe('available');
 
-    const metricas = await dataSource.query(
+    const metricas = await rawQuery(dataSource, 
       'SELECT stops_delivered, stops_failed, actual_duration_min FROM route_execution_metrics WHERE route_id = ?',
       [route.route_id],
     );
@@ -180,7 +181,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
         ['pending', null],
       ]);
 
-      const eventos = await dataSource.query(
+      const eventos = await rawQuery(dataSource, 
         "SELECT notes FROM route_event WHERE route_id = ? AND type = 'route_cancelled'",
         [route.route_id],
       );
@@ -258,7 +259,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       await post(`${base}/cancel`, body).expect(200);
       await post(`${base}/cancel`, body).expect(200);
 
-      const total = await dataSource.query(
+      const total = await rawQuery(dataSource, 
         "SELECT COUNT(*) AS total FROM route_event WHERE route_id = ? AND type = 'route_cancelled'",
         [route.route_id],
       );
@@ -284,7 +285,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       // O aparelho não recebeu as respostas e manda tudo de novo.
       for (const item of fila) await post(item.path, item.body).expect(200);
 
-      const eventos = await dataSource.query(
+      const eventos = await rawQuery(dataSource, 
         'SELECT type FROM route_event WHERE route_id = ? ORDER BY occurred_at',
         [route.route_id],
       );
@@ -336,7 +337,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       await post(`${base}/locations`, { points }).expect(200).expect({ accepted: 120 });
       await post(`${base}/locations`, { points }).expect(200);
 
-      const total = await dataSource.query(
+      const total = await rawQuery(dataSource, 
         'SELECT COUNT(*) AS total FROM route_location_ping WHERE route_id = ?',
         [route.route_id],
       );
@@ -358,7 +359,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       await post(`${base}/stops/${orders[0].order_id}/deliver`, evento(20)).expect(200);
       await post(`${base}/finish`, evento(30)).expect(200);
 
-      const semRastro = await dataSource.query(
+      const semRastro = await rawQuery(dataSource, 
         'SELECT actual_distance_m FROM route_execution_metrics WHERE route_id = ?',
         [route.route_id],
       );
@@ -367,7 +368,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       // 26 pontos, 25 trechos de ~222 m.
       await post(`${base}/locations`, { points: rastro(26) }).expect(200);
 
-      const comRastro = await dataSource.query(
+      const comRastro = await rawQuery(dataSource, 
         'SELECT actual_distance_m, ping_count FROM route_execution_metrics WHERE route_id = ?',
         [route.route_id],
       );

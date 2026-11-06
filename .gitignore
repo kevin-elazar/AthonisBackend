@@ -1,7 +1,6 @@
 # compiled output
 /dist
 node_modules/
-package-lock.json
 
 # Logs
 logs
@@ -28,3 +27,8 @@ coverage/
 athonis-*.json
 credentials/
 *-service-account*.json
+
+# infra local
+infra/.env
+infra/secrets/
+backups/

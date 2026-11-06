@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from '../../database/column-types';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -49,9 +50,9 @@ export class GeocodeCache {
   @Column({ type: 'int', default: 0 })
   hits: number;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
-  @UpdateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @UpdateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   updated_at!: Date;
 }

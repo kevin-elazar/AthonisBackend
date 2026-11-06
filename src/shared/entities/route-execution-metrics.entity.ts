@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from "../../database/column-types";
 import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
 
 /** Planejado e executado de uma parada, lado a lado. */
@@ -87,6 +88,6 @@ export class RouteExecutionMetrics {
   @Column({ type: 'simple-json', nullable: true })
   stops?: StopExecution[];
 
-  @Column()
+  @Column({ type: DATETIME_TYPE })
   computed_at: Date;
 }

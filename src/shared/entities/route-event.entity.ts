@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from "../../database/column-types";
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 import { OccurrenceType, RouteEventType } from '../domain/enums';
 
@@ -57,11 +58,11 @@ export class RouteEvent {
    * Hora do aparelho, no momento do toque. É a hora que vale: o evento pode
    * ter ficado horas na fila offline antes de chegar aqui.
    */
-  @Column()
+  @Column({ type: DATETIME_TYPE })
   occurred_at: Date;
 
   /** Hora em que o servidor recebeu. A diferença para `occurred_at` mede o atraso de sincronização. */
-  @CreateDateColumn()
+  @CreateDateColumn({ type: DATETIME_TYPE })
   received_at!: Date;
 
   /**

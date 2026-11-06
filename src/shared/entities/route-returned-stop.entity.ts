@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from "../../database/column-types";
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 /**
@@ -33,6 +34,6 @@ export class RouteReturnedStop {
   @Column({ type: 'int', nullable: true })
   stop_sequence?: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: DATETIME_TYPE })
   created_at!: Date;
 }

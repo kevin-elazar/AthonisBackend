@@ -6,8 +6,8 @@
  * Jaraguá do Sul. Fica marcada como simulada, do mesmo jeito que uma rota
  * gerada sem a Route Optimization API.
  *
- * Pré-requisito: subir o backend uma vez depois de atualizar o código, para
- * o TypeORM criar as colunas e tabelas novas.
+ * Pré-requisito: banco com as migrations aplicadas (`npm run migration:run`
+ * ou subir o backend uma vez).
  *
  * Uso:
  *   node scripts/seed-driver-demo.js
@@ -16,12 +16,8 @@
  *
  * Rodar de novo cria outra rota para hoje e mantém o mesmo acesso.
  */
-const path = require('path');
-const sqlite3 = require('sqlite3');
 const bcrypt = require('bcrypt');
-require('dotenv').config();
-
-const DB_PATH = process.env.DB_NAME || './src/database/database.sqlite';
+const { openDb } = require('./lib/db');
 
 const DEFAULT_EMAIL = 'motorista@athonis.com';
 // Credencial de demonstração, como a do admin em seed-demo-data.js. Troque com --senha.
@@ -54,20 +50,9 @@ function parseArgs(argv) {
   return args;
 }
 
-const db = new sqlite3.Database(path.resolve(DB_PATH));
-
-const run = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function callback(error) {
-      if (error) return reject(error);
-      resolve(this);
-    });
-  });
-
-const get = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (error, row) => (error ? reject(error) : resolve(row)));
-  });
+let db;
+const run = (sql, params) => db.run(sql, params);
+const get = (sql, params) => db.get(sql, params);
 
 function today(timeZone) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -84,12 +69,10 @@ async function main() {
   const password = args.senha || DEFAULT_PASSWORD;
   const totalStops = Math.min(Math.max(Number(args.paradas) || 5, 1), STOPS.length);
 
-  const hasColumn = await get(
-    "SELECT 1 AS ok FROM pragma_table_info('user') WHERE name = 'driver_id'",
-  );
-  if (!hasColumn) {
+  db = await openDb();
+  if (!(await db.columnExists('user', 'driver_id'))) {
     throw new Error(
-      'A coluna user.driver_id ainda não existe. Suba o backend uma vez (npm run start:dev) para atualizar o banco e rode de novo.',
+      'O esquema do banco está desatualizado. Rode `npm run migration:run` (ou suba o backend) e tente de novo.',
     );
   }
 
@@ -103,7 +86,7 @@ async function main() {
   const dia = today(company.timezone || 'America/Sao_Paulo');
 
   // ---- Motorista: reaproveita o do acesso, senão o primeiro da empresa, senão cria.
-  const existingUser = await get('SELECT id, driver_id, id_company FROM user WHERE email = ?', [email]);
+  const existingUser = await get('SELECT id, driver_id, id_company FROM "user" WHERE email = ?', [email]);
   if (existingUser && existingUser.id_company !== idCompany) {
     throw new Error(`O e-mail ${email} já pertence a um usuário de outra empresa.`);
   }
@@ -129,12 +112,12 @@ async function main() {
   const hash = await bcrypt.hash(password, 10);
   if (existingUser) {
     await run(
-      "UPDATE user SET password = ?, role = 'driver', driver_id = ?, is_active = 1 WHERE id = ?",
+      `UPDATE "user" SET password = ?, role = 'driver', driver_id = ?, is_active = TRUE WHERE id = ?`,
       [hash, driver.driver_id, existingUser.id],
     );
   } else {
     await run(
-      "INSERT INTO user (email, password, name, role, id_company, driver_id, is_active, created_by) VALUES (?, ?, ?, 'driver', ?, ?, 1, 'seed-driver-demo')",
+      `INSERT INTO "user" (email, password, name, role, id_company, driver_id, is_active, created_by) VALUES (?, ?, ?, 'driver', ?, ?, TRUE, 'seed-driver-demo')`,
       [email, hash, driver.name, idCompany, driver.driver_id],
     );
   }
@@ -148,13 +131,13 @@ async function main() {
   const route = await run(
     `INSERT INTO route
        (id_company, driver_id, vehicle_id, status, planned_date, total_distance_m, total_duration_min, simulated, region, created_by)
-     VALUES (?, ?, ?, 'planned', ?, ?, ?, 1, 'Jaraguá do Sul', 'seed-driver-demo')`,
+     VALUES (?, ?, ?, 'planned', ?, ?, ?, TRUE, 'Jaraguá do Sul', 'seed-driver-demo')`,
     [idCompany, driver.driver_id, vehicle?.vehicle_id ?? null, dia, totalStops * 4200, totalStops * 22],
   );
 
   // Cada rota comeca num ponto diferente da lista, para rodadas seguidas
   // nao criarem varias rotas com exatamente as mesmas paradas.
-  const firstStop = (route.lastID * 3) % STOPS.length;
+  const firstStop = (Number(route.lastID) * 3) % STOPS.length;
 
   for (let index = 0; index < totalStops; index += 1) {
     const stop = STOPS[(firstStop + index) % STOPS.length];
@@ -199,4 +182,4 @@ main()
     console.error('Falha:', error.message);
     process.exitCode = 1;
   })
-  .finally(() => db.close());
+  .finally(() => db && db.close());

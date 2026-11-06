@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from "../../database/column-types";
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 /**
@@ -21,7 +22,7 @@ export class RefreshToken {
   @Column({ type: 'varchar', length: 64 })
   token_hash: string;
 
-  @Column()
+  @Column({ type: DATETIME_TYPE })
   expires_at: Date;
 
   /**
@@ -30,17 +31,17 @@ export class RefreshToken {
    * aparelho repete o pedido com o token antigo. Sem essa tolerância, um
    * túnel no caminho deslogaria o entregador.
    */
-  @Column({ nullable: true })
+  @Column({ type: DATETIME_TYPE, nullable: true })
   replaced_at?: Date;
 
   /** Logout ou revogação pelo escritório. Não tem tolerância. */
-  @Column({ nullable: true })
+  @Column({ type: DATETIME_TYPE, nullable: true })
   revoked_at?: Date;
 
   /** Texto livre enviado pelo aparelho, para o escritório reconhecer a sessão. */
   @Column({ type: 'varchar', length: 120, nullable: true })
   device?: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: DATETIME_TYPE })
   created_at!: Date;
 }

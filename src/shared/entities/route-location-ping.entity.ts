@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from "../../database/column-types";
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 /**
@@ -39,10 +40,10 @@ export class RouteLocationPing {
   speed_mps?: number;
 
   /** Hora do aparelho em que o ponto foi lido. */
-  @Column()
+  @Column({ type: DATETIME_TYPE })
   recorded_at: Date;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: DATETIME_TYPE })
   received_at!: Date;
 
   /** Identificador gerado no aparelho, para o reenvio de um lote não duplicar pontos. */

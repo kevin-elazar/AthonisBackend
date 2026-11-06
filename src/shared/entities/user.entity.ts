@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from '../../database/column-types';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -43,19 +44,19 @@ export class User {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   created_by?: string;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updated_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   updated_by?: string;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: DATETIME_TYPE, nullable: true })
   last_login?: Date;
 }
 

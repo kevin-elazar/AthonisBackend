@@ -1,6 +1,7 @@
+import { containsInsensitive } from '../../../database/column-types';
 import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindOptionsWhere } from 'typeorm';
+import { Repository, FindOptionsWhere } from 'typeorm';
 import { Driver } from '../../../shared/entities/driver.entity';
 import { CreateDriverDto } from '../dto/create-driver.dto';
 import { UpdateDriverDto } from '../dto/update-driver.dto';
@@ -128,7 +129,7 @@ export class DriversService {
     }
 
     if (name) {
-      where.name = Like(`%${name.trim()}%`);
+      where.name = containsInsensitive(name.trim());
     }
 
     if (document) {

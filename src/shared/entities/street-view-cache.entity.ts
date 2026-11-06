@@ -1,3 +1,4 @@
+import { DATETIME_TYPE, decimalTransformer } from '../../database/column-types';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -40,10 +41,10 @@ export class StreetViewCache {
   @Column({ type: 'varchar', length: 100, nullable: true })
   pano_id: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 7, transformer: decimalTransformer, nullable: true })
   latitude: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 7, transformer: decimalTransformer, nullable: true })
   longitude: number;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
@@ -52,13 +53,13 @@ export class StreetViewCache {
   @Column({ type: 'text', nullable: true })
   image_url: string;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   created_by?: string;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updated_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })

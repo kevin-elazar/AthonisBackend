@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from '../../database/column-types';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -82,20 +83,20 @@ export class Route {
   @Column({ type: 'varchar', length: 100, nullable: true })
   region?: string;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: DATETIME_TYPE, nullable: true })
   started_at?: Date;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: DATETIME_TYPE, nullable: true })
   finished_at?: Date;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   created_by?: string;
 
   @CreateDateColumn({
-    type: 'datetime',
+    type: DATETIME_TYPE,
     default: () => 'CURRENT_TIMESTAMP',
     onUpdate: 'CURRENT_TIMESTAMP',
   })

@@ -14,6 +14,7 @@ import { StreetViewModule } from "./modules/street-view/street-view.module";
 import { CompanyModule } from "./modules/company/company.module";
 import { DriverAppModule } from "./modules/driver-app/driver-app.module";
 import { AnalyticsModule } from "./modules/analytics/analytics.module";
+import { ObservabilityModule } from "./modules/observability/observability.module";
 import { DriverRestrictionGuard } from "./modules/auth/guards/driver-restriction.guard";
 
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
@@ -36,6 +37,7 @@ import { TenantInterceptor } from "./shared/tenant/tenant.interceptor";
       skipIf: () => process.env.NODE_ENV === "test",
     }),
     TypeOrmModule.forRoot(databaseConfig),
+    ObservabilityModule,
     TenantModule,
     AuthModule,
     CompanyModule,

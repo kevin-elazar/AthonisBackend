@@ -1,3 +1,4 @@
+import { rawQuery } from './helpers/db.helper';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
@@ -178,7 +179,7 @@ describe('Aplicativo do entregador (e2e)', () => {
       await http().post(url).set('Authorization', `Bearer ${token}`).send(body).expect(200);
       await http().post(url).set('Authorization', `Bearer ${token}`).send(body).expect(200);
 
-      const eventos = await dataSource.query(
+      const eventos = await rawQuery(dataSource, 
         'SELECT COUNT(*) AS total FROM route_event WHERE client_event_id = ?',
         [body.client_event_id],
       );

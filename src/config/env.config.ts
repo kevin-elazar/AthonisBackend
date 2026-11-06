@@ -28,8 +28,7 @@ function optionalEnv(name: string): string | undefined {
 export const config = {
   isProduction,
   database: {
-    type: process.env.DB_TYPE || 'sqlite',
-    database: process.env.DB_NAME || './src/database/database.sqlite',
+    type: process.env.DB_TYPE || 'postgres',
   },
   port: Number(process.env.PORT) || 8080,
   jwt: {
@@ -47,6 +46,10 @@ export const config = {
     geocodingApiKey: optionalEnv('GOOGLE_GEOCODING_API_KEY'),
     projectId: optionalEnv('GOOGLE_PROJECT_ID'),
   },
+  sentry: {
+    dsn: optionalEnv('SENTRY_DSN'),
+    environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
+  },
   uploads: {
     rootDir: process.env.UPLOADS_DIR || 'importacoes',
   },
@@ -60,6 +63,12 @@ export function validateEnvironment(): void {
   // Acessar config.jwt.secret já dispara requireEnv.
   if (!config.jwt.secret) {
     throw new Error('JWT_SECRET inválido');
+  }
+
+  if (isProduction && config.database.type !== 'postgres') {
+    throw new Error(
+      'Em produção o banco precisa ser PostgreSQL (DB_TYPE=postgres). SQLite é aceito só nos testes.',
+    );
   }
 
   if (isProduction && !config.cors.origins?.length) {

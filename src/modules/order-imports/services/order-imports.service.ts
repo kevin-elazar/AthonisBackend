@@ -167,6 +167,9 @@ export class OrderImportsService {
               resolve(true);
             }
           })
+          // Sem consumidor de 'data' o stream fica pausado e 'end' nunca
+          // dispara: um arquivo vazio deixava a requisição pendurada.
+          .on('data', () => undefined)
           .on('error', (error) => {
             reject(new BadRequestException(`Erro ao ler CSV: ${error.message}`));
           })

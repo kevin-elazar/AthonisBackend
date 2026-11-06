@@ -22,12 +22,9 @@
  * Listar as empresas existentes:
  *   node scripts/create-company.js --listar
  */
-const path = require('path');
-const sqlite3 = require('sqlite3');
 const bcrypt = require('bcrypt');
-require('dotenv').config();
+const { openDb } = require('./lib/db');
 
-const DB_PATH = process.env.DB_NAME || './src/database/database.sqlite';
 
 function parseArgs(argv) {
   const args = {};
@@ -46,30 +43,15 @@ function parseArgs(argv) {
   return args;
 }
 
-const db = new sqlite3.Database(path.resolve(DB_PATH));
-
-const run = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function callback(error) {
-      if (error) return reject(error);
-      resolve(this);
-    });
-  });
-
-const all = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (error, rows) => (error ? reject(error) : resolve(rows)));
-  });
-
-const get = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (error, row) => (error ? reject(error) : resolve(row)));
-  });
+let db;
+const run = (sql, params) => db.run(sql, params);
+const all = (sql, params) => db.all(sql, params);
+const get = (sql, params) => db.get(sql, params);
 
 function fail(message) {
   console.error(`\nErro: ${message}\n`);
-  db.close();
-  process.exit(1);
+  Promise.resolve(db && db.close()).finally(() => process.exit(1));
+  throw new Error(message);
 }
 
 async function listCompanies() {
@@ -84,7 +66,7 @@ async function listCompanies() {
 
   console.log('\nEmpresas cadastradas:\n');
   for (const row of rows) {
-    const users = await get('SELECT COUNT(*) AS n FROM user WHERE id_company = ?', [row.id_company]);
+    const users = await get('SELECT COUNT(*) AS n FROM "user" WHERE id_company = ?', [row.id_company]);
     console.log(
       `  [${row.id_company}] ${row.trade_name || row.corporate_name}` +
         ` — CNPJ ${row.document}` +
@@ -98,10 +80,11 @@ async function listCompanies() {
 
 async function main() {
   const args = parseArgs(process.argv);
+  db = await openDb();
 
   if (args.listar) {
     await listCompanies();
-    db.close();
+    await db.close();
     return;
   }
 
@@ -136,14 +119,13 @@ async function main() {
     fail(`já existe uma empresa com id_company = ${idCompany}. Use outro identificador.`);
   }
 
-  const emailInUse = await get('SELECT id FROM user WHERE email = ?', [args['admin-email']]);
+  const emailInUse = await get('SELECT id FROM "user" WHERE email = ?', [args['admin-email']]);
   if (emailInUse) {
     fail(`o email ${args['admin-email']} já está em uso por outro usuário.`);
   }
 
-  await run('BEGIN');
-
   try {
+    await run('BEGIN');
     await run(
       `INSERT INTO company (
          id_company, corporate_name, trade_name, document, state_registration,
@@ -153,7 +135,7 @@ async function main() {
          cost_per_km, cost_per_hour, stop_duration_minutes, default_vehicle_capacity_kg,
          operation_start_time, operation_end_time,
          timezone, is_active, created_at, created_by, updated_at, updated_by
-       ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?, ?,1, datetime('now'), 'script', datetime('now'), 'script')`,
+       ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?, ?,TRUE, datetime('now'), 'script', datetime('now'), 'script')`,
       [
         idCompany,
         args.nome,
@@ -185,8 +167,8 @@ async function main() {
     const passwordHash = await bcrypt.hash(String(args['admin-senha']), 10);
 
     await run(
-      `INSERT INTO user (id_company, email, password, name, role, is_active, created_at, created_by, updated_at, updated_by)
-       VALUES (?,?,?,?,'admin',1, datetime('now'), 'script', datetime('now'), 'script')`,
+      `INSERT INTO "user" (id_company, email, password, name, role, is_active, created_at, created_by, updated_at, updated_by)
+       VALUES (?,?,?,?,'admin',TRUE, datetime('now'), 'script', datetime('now'), 'script')`,
       [
         idCompany,
         args['admin-email'],
@@ -214,11 +196,16 @@ async function main() {
   }
 
   console.log('');
-  db.close();
+  await db.close();
 }
 
 main().catch((error) => {
-  console.error('Falha inesperada:', error.message);
-  db.close();
-  process.exit(1);
+  if (error instanceof FalhaEsperada) {
+    console.error(`
+Erro: ${error.message}
+`);
+  } else {
+    console.error('Falha inesperada:', error.message);
+  }
+  Promise.resolve(db && db.close()).finally(() => process.exit(1));
 });

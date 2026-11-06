@@ -1,6 +1,7 @@
 import { Injectable, NestInterceptor, ExecutionContext, CallHandler, HttpException, Logger } from '@nestjs/common';
 import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+import * as Sentry from '@sentry/nestjs';
 
 @Injectable()
 export class HttpErrorInterceptor implements NestInterceptor {
@@ -16,8 +17,14 @@ export class HttpErrorInterceptor implements NestInterceptor {
         // reconhecido pelo filtro e a lista `errors` (campo a campo) se perdia
         // antes de chegar ao cliente.
         if (error instanceof HttpException) {
+          if (error.getStatus() >= 500) {
+            Sentry.captureException(error);
+          }
           return throwError(() => error);
         }
+
+        // Erro inesperado: vai para o Sentry (sem efeito se SENTRY_DSN não existir).
+        Sentry.captureException(error);
 
         return throwError(() => ({
           statusCode: error.status || 500,

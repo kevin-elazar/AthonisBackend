@@ -1,6 +1,7 @@
+import { containsInsensitive } from '../../../database/column-types';
 import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindOptionsWhere } from 'typeorm';
+import { Repository, FindOptionsWhere } from 'typeorm';
 import { Order } from '../../../shared/entities/order.entity';
 import { Client } from '../../../shared/entities/client.entity';
 import { Vehicle } from '../../../shared/entities/vehicle.entity';
@@ -131,7 +132,7 @@ export class OrdersService {
     const where: FindOptionsWhere<Order> = {};
 
     if (title) {
-      where.title = Like(`%${title.trim()}%`);
+      where.title = containsInsensitive(title.trim());
     }
 
     if (urgency) {

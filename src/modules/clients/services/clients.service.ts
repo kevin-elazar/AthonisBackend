@@ -1,3 +1,4 @@
+import { containsInsensitive } from '../../../database/column-types';
 import {
   Injectable,
   Logger,
@@ -6,7 +7,7 @@ import {
   InternalServerErrorException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, Like, In, FindOptionsWhere } from "typeorm";
+import { Repository, In, FindOptionsWhere } from "typeorm";
 import { Client } from "../../../shared/entities/client.entity";
 import { CreateClientDto } from "../dto/create-client.dto";
 import { UpdateClientDto } from "../dto/update-client.dto";
@@ -194,7 +195,7 @@ export class ClientsService {
     }
 
     if (name) {
-      where.name = Like(`%${name.trim()}%`);
+      where.name = containsInsensitive(name.trim());
     }
 
     if (document) {

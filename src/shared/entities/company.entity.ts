@@ -1,3 +1,4 @@
+import { DATETIME_TYPE, decimalTransformer } from '../../database/column-types';
 import { Entity, PrimaryColumn, Column, CreateDateColumn } from 'typeorm';
 
 /**
@@ -75,10 +76,10 @@ export class Company {
    * Coordenadas do depósito. É daqui que toda rota parte e para onde volta —
    * o campo que substitui as coordenadas fixas da Praça da Sé no código.
    */
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 7, transformer: decimalTransformer, nullable: true })
   depot_latitude?: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 7, transformer: decimalTransformer, nullable: true })
   depot_longitude?: number;
 
   /**
@@ -95,11 +96,11 @@ export class Company {
   // ------------------------------------------- Parâmetros de roteirização
 
   /** Custo por quilômetro rodado, usado na otimização. */
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 1.0 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, transformer: decimalTransformer, default: 1.0 })
   cost_per_km: number;
 
   /** Custo por hora de operação, usado na otimização. */
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 50.0 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, transformer: decimalTransformer, default: 50.0 })
   cost_per_hour: number;
 
   /** Tempo médio parado em cada entrega, em minutos. */
@@ -131,14 +132,14 @@ export class Company {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   created_by?: string;
 
   @CreateDateColumn({
-    type: 'datetime',
+    type: DATETIME_TYPE,
     default: () => 'CURRENT_TIMESTAMP',
     onUpdate: 'CURRENT_TIMESTAMP',
   })

@@ -18,36 +18,89 @@
  * calcula na primeira vez que abre, pelo mesmo código que consolida uma rota
  * encerrada pelo aplicativo.
  */
-const path = require('path');
-const { randomUUID } = require('crypto');
-const sqlite3 = require('sqlite3');
-require('dotenv').config();
+const { randomUUID } = require("crypto");
+const { openDb, DB_TYPE } = require("./lib/db");
 
-const DB_PATH = process.env.DB_NAME || './src/database/database.sqlite';
-const AUTHOR = 'seed-history-demo';
+const AUTHOR = "seed-history-demo";
 
 const DEPOT = { lat: -26.4851, lng: -49.0669 };
 
 const STOPS = [
-  { title: 'Dobradiças e corrediças', street: 'Rua Walter Marquardt', number: '1548', district: 'Barra do Rio Molha', lat: -26.4741, lng: -49.0993 },
-  { title: 'Puxadores linha premium', street: 'Rua Bernardo Dornbusch', number: '2155', district: 'Baependi', lat: -26.4708, lng: -49.0655 },
-  { title: 'Chapas de MDF 18mm', street: 'Rua Roberto Ziemann', number: '2600', district: 'Amizade', lat: -26.4552, lng: -49.0741 },
-  { title: 'Fechaduras para armário', street: 'Rua Epitácio Pessoa', number: '1081', district: 'Centro', lat: -26.4836, lng: -49.0699 },
-  { title: 'Trilhos para porta de correr', street: 'Rua Presidente Epitácio Pessoa', number: '2850', district: 'Vila Lenzi', lat: -26.4962, lng: -49.0858 },
-  { title: 'Ferragens para cozinha', street: 'Rua José Theodoro Ribeiro', number: '1500', district: 'Ilha da Figueira', lat: -26.4983, lng: -49.0479 },
-  { title: 'Kit de parafusos e buchas', street: 'Rua Manoel Francisco da Costa', number: '4300', district: 'João Pessoa', lat: -26.4423, lng: -49.0448 },
-  { title: 'Suportes para prateleira', street: 'Rua Angelo Rubini', number: '1011', district: 'Barra do Rio Cerro', lat: -26.5131, lng: -49.1164 },
+  {
+    title: "Dobradiças e corrediças",
+    street: "Rua Walter Marquardt",
+    number: "1548",
+    district: "Barra do Rio Molha",
+    lat: -26.4741,
+    lng: -49.0993,
+  },
+  {
+    title: "Puxadores linha premium",
+    street: "Rua Bernardo Dornbusch",
+    number: "2155",
+    district: "Baependi",
+    lat: -26.4708,
+    lng: -49.0655,
+  },
+  {
+    title: "Chapas de MDF 18mm",
+    street: "Rua Roberto Ziemann",
+    number: "2600",
+    district: "Amizade",
+    lat: -26.4552,
+    lng: -49.0741,
+  },
+  {
+    title: "Fechaduras para armário",
+    street: "Rua Epitácio Pessoa",
+    number: "1081",
+    district: "Centro",
+    lat: -26.4836,
+    lng: -49.0699,
+  },
+  {
+    title: "Trilhos para porta de correr",
+    street: "Rua Presidente Epitácio Pessoa",
+    number: "2850",
+    district: "Vila Lenzi",
+    lat: -26.4962,
+    lng: -49.0858,
+  },
+  {
+    title: "Ferragens para cozinha",
+    street: "Rua José Theodoro Ribeiro",
+    number: "1500",
+    district: "Ilha da Figueira",
+    lat: -26.4983,
+    lng: -49.0479,
+  },
+  {
+    title: "Kit de parafusos e buchas",
+    street: "Rua Manoel Francisco da Costa",
+    number: "4300",
+    district: "João Pessoa",
+    lat: -26.4423,
+    lng: -49.0448,
+  },
+  {
+    title: "Suportes para prateleira",
+    street: "Rua Angelo Rubini",
+    number: "1011",
+    district: "Barra do Rio Cerro",
+    lat: -26.5131,
+    lng: -49.1164,
+  },
 ];
 
 const OCCURRENCES = [
-  ['customer_absent', 'Ninguém atendeu o interfone'],
-  ['closed_establishment', 'Empresa fechada para almoço'],
-  ['refused', 'Cliente recusou: pedido divergente'],
-  ['access_restricted', 'Portaria não liberou a entrada do caminhão'],
-  ['address_not_found', 'Número não existe na rua'],
+  ["customer_absent", "Ninguém atendeu o interfone"],
+  ["closed_establishment", "Empresa fechada para almoço"],
+  ["refused", "Cliente recusou: pedido divergente"],
+  ["access_restricted", "Portaria não liberou a entrada do caminhão"],
+  ["address_not_found", "Número não existe na rua"],
 ];
 
-const DEMO_DRIVERS = ['Carla Demonstração', 'Bruno Demonstração'];
+const DEMO_DRIVERS = ["Carla Demonstração", "Bruno Demonstração"];
 
 const PLANNED_SPEED_MPS = 8.3; // ~30 km/h
 const PLANNED_SERVICE_MIN = 10;
@@ -72,19 +125,24 @@ function haversine(a, b) {
   const dLat = rad(b.lat - a.lat);
   const dLng = rad(b.lng - a.lng);
   const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * 6371000 * Math.asin(Math.sqrt(h));
 }
 
 /** Formato em que o TypeORM grava datas no SQLite (UTC). */
-const sqlDate = (ms) => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
+// O PostgreSQL recebe o instante com fuso (ISO com Z); o SQLite antigo, no formato que o TypeORM gravava.
+const sqlDate = (ms) =>
+  DB_TYPE === "sqlite"
+    ? new Date(ms).toISOString().replace("T", " ").replace("Z", "")
+    : new Date(ms).toISOString();
 
 function parseArgs(argv) {
   const args = {};
   for (let i = 2; i < argv.length; i += 1) {
-    if (!argv[i].startsWith('--')) continue;
+    if (!argv[i].startsWith("--")) continue;
     const next = argv[i + 1];
-    if (!next || next.startsWith('--')) args[argv[i].slice(2)] = true;
+    if (!next || next.startsWith("--")) args[argv[i].slice(2)] = true;
     else {
       args[argv[i].slice(2)] = next;
       i += 1;
@@ -93,64 +151,80 @@ function parseArgs(argv) {
   return args;
 }
 
-const db = new sqlite3.Database(path.resolve(DB_PATH));
-const run = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function callback(error) {
-      if (error) return reject(error);
-      resolve(this);
-    });
-  });
-const get = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (error, row) => (error ? reject(error) : resolve(row)));
-  });
-const all = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (error, rows) => (error ? reject(error) : resolve(rows)));
-  });
+let db;
+const run = (sql, params) => db.run(sql, params);
+const get = (sql, params) => db.get(sql, params);
+const all = (sql, params) => db.all(sql, params);
 
 /** Meio-dia UTC do dia `offset` dias atrás, no fuso de Brasília (UTC-3), às 08:00 locais. */
 function dayStartMs(offset) {
   const now = new Date();
   const local = new Date(now.getTime() - 3 * 3600_000);
-  const midnightUtc = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() - offset);
-  return { day: new Date(midnightUtc).toISOString().slice(0, 10), startMs: midnightUtc + 11 * 3600_000 };
+  const midnightUtc = Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate() - offset,
+  );
+  return {
+    day: new Date(midnightUtc).toISOString().slice(0, 10),
+    startMs: midnightUtc + 11 * 3600_000,
+  };
 }
 
 // ------------------------------------------------------------------ limpeza
 
 async function clean() {
-  const routes = await all('SELECT route_id, history_id FROM route WHERE created_by = ?', [AUTHOR]);
+  const routes = await all(
+    "SELECT route_id, history_id FROM route WHERE created_by = ?",
+    [AUTHOR],
+  );
   const ids = routes.map((route) => route.route_id);
   if (ids.length > 0) {
-    const marks = ids.map(() => '?').join(',');
+    const marks = ids.map(() => "?").join(",");
     await run(`DELETE FROM route_event WHERE route_id IN (${marks})`, ids);
-    await run(`DELETE FROM route_location_ping WHERE route_id IN (${marks})`, ids);
-    await run(`DELETE FROM route_execution_metrics WHERE route_id IN (${marks})`, ids);
+    await run(
+      `DELETE FROM route_location_ping WHERE route_id IN (${marks})`,
+      ids,
+    );
+    await run(
+      `DELETE FROM route_execution_metrics WHERE route_id IN (${marks})`,
+      ids,
+    );
     await run(`DELETE FROM "order" WHERE route_id IN (${marks})`, ids);
     await run(`DELETE FROM route WHERE route_id IN (${marks})`, ids);
   }
-  await run('DELETE FROM optimized_route_history WHERE created_by = ?', [AUTHOR]);
+  await run("DELETE FROM optimized_route_history WHERE created_by = ?", [
+    AUTHOR,
+  ]);
   await run(
-    'DELETE FROM driver WHERE created_by = ? AND driver_id NOT IN (SELECT driver_id FROM route WHERE driver_id IS NOT NULL)',
+    "DELETE FROM driver WHERE created_by = ? AND driver_id NOT IN (SELECT driver_id FROM route WHERE driver_id IS NOT NULL)",
     [AUTHOR],
   );
-  console.log(`Removidas ${ids.length} rota(s) de demonstração e o que dependia delas.`);
+  console.log(
+    `Removidas ${ids.length} rota(s) de demonstração e o que dependia delas.`,
+  );
 }
 
 // ------------------------------------------------------------------ geração
 
-async function createRoute({ idCompany, driver, vehicleId, offset, random, live = false }) {
+async function createRoute({
+  idCompany,
+  driver,
+  vehicleId,
+  offset,
+  random,
+  live = false,
+}) {
   // Rota ao vivo: saiu há 50 minutos e ainda está na rua.
   const { day, startMs } = live
     ? { day: dayStartMs(0).day, startMs: Date.now() - 50 * 60_000 }
     : dayStartMs(offset);
   const count = 4 + Math.floor(random() * 3);
   const first = Math.floor(random() * STOPS.length);
-  const planned = Array.from({ length: count }, (_, i) => STOPS[(first + i * 3) % STOPS.length]).filter(
-    (stop, i, list) => list.indexOf(stop) === i,
-  );
+  const planned = Array.from(
+    { length: count },
+    (_, i) => STOPS[(first + i * 3) % STOPS.length],
+  ).filter((stop, i, list) => list.indexOf(stop) === i);
 
   // ---- Planejado: ordem, chegada prevista e totais, como a otimização devolveria.
   let cursor = DEPOT;
@@ -171,7 +245,7 @@ async function createRoute({ idCompany, driver, vehicleId, offset, random, live 
   const route = await run(
     `INSERT INTO route
        (id_company, driver_id, vehicle_id, status, planned_date, total_distance_m, total_duration_min, simulated, region, created_by)
-     VALUES (?, ?, ?, 'completed', ?, ?, ?, 0, 'Jaraguá do Sul', ?)`,
+     VALUES (?, ?, ?, 'completed', ?, ?, ?, FALSE, 'Jaraguá do Sul', ?)`,
     [
       idCompany,
       driver.driver_id,
@@ -221,7 +295,7 @@ async function createRoute({ idCompany, driver, vehicleId, offset, random, live 
      VALUES (?, ?, 1, ?, 0, '{}', ?, 'success', 'Dados de demonstração', ?)`,
     [
       idCompany,
-      orderIds.join(','),
+      orderIds.join(","),
       orderIds.length,
       JSON.stringify({
         routes: [
@@ -237,7 +311,10 @@ async function createRoute({ idCompany, driver, vehicleId, offset, random, live 
       AUTHOR,
     ],
   );
-  await run('UPDATE route SET history_id = ? WHERE route_id = ?', [history.lastID, routeId]);
+  await run("UPDATE route SET history_id = ? WHERE route_id = ?", [
+    history.lastID,
+    routeId,
+  ]);
 
   // ---- Executado: o que o entregador fez de diferente do plano.
   const visitOrder = planned.map((_, i) => i);
@@ -251,14 +328,19 @@ async function createRoute({ idCompany, driver, vehicleId, offset, random, live 
   let now = live ? startMs : startMs + Math.floor(random() * 15) * 60_000;
   let position = DEPOT;
   const startedAt = now;
-  events.push({ type: 'route_started', order: null, at: now });
+  events.push({ type: "route_started", order: null, at: now });
 
   const addPing = (lat, lng, at) =>
-    pings.push({ lat: lat + (random() - 0.5) * 0.00004, lng: lng + (random() - 0.5) * 0.00004, at });
+    pings.push({
+      lat: lat + (random() - 0.5) * 0.00004,
+      lng: lng + (random() - 0.5) * 0.00004,
+      at,
+    });
 
   const wait = (minutes) => {
     const end = now + minutes * 60_000;
-    for (; now < end; now += PING_INTERVAL_S * 1000) addPing(position.lat, position.lng, now);
+    for (; now < end; now += PING_INTERVAL_S * 1000)
+      addPing(position.lat, position.lng, now);
     now = end;
   };
 
@@ -266,24 +348,34 @@ async function createRoute({ idCompany, driver, vehicleId, offset, random, live 
     // Um ponto intermediário fora da reta: o trajeto real nunca é a linha direta.
     const detour = (random() - 0.5) * 0.3;
     const via = {
-      lat: (position.lat + target.lat) / 2 + (target.lng - position.lng) * detour,
-      lng: (position.lng + target.lng) / 2 - (target.lat - position.lat) * detour,
+      lat:
+        (position.lat + target.lat) / 2 + (target.lng - position.lng) * detour,
+      lng:
+        (position.lng + target.lng) / 2 - (target.lat - position.lat) * detour,
     };
     const speed = PLANNED_SPEED_MPS * (0.7 + random() * 0.5);
     for (const [from, to] of [
       [position, via],
       [via, target],
     ]) {
-      const steps = Math.max(1, Math.round(haversine(from, to) / speed / PING_INTERVAL_S));
+      const steps = Math.max(
+        1,
+        Math.round(haversine(from, to) / speed / PING_INTERVAL_S),
+      );
       for (let step = 1; step <= steps; step += 1) {
         now += PING_INTERVAL_S * 1000;
-        addPing(from.lat + ((to.lat - from.lat) * step) / steps, from.lng + ((to.lng - from.lng) * step) / steps, now);
+        addPing(
+          from.lat + ((to.lat - from.lat) * step) / steps,
+          from.lng + ((to.lng - from.lng) * step) / steps,
+          now,
+        );
       }
     }
     position = target;
   };
 
-  const idleBefore = random() < 0.35 ? Math.floor(random() * visitOrder.length) : -1;
+  const idleBefore =
+    random() < 0.35 ? Math.floor(random() * visitOrder.length) : -1;
 
   for (const [visit, plannedIndex] of visitOrder.entries()) {
     // Parada no caminho que não é entrega: abastecimento, lanche, espera.
@@ -291,45 +383,57 @@ async function createRoute({ idCompany, driver, vehicleId, offset, random, live 
 
     drive(planned[plannedIndex]);
     const orderId = orderIds[plannedIndex];
-    events.push({ type: 'arrived', order: orderId, at: now });
+    events.push({ type: "arrived", order: orderId, at: now });
 
     wait(4 + Math.floor(random() * 14));
 
     if (random() < 0.15) {
-      const [occurrence, notes] = OCCURRENCES[Math.floor(random() * OCCURRENCES.length)];
-      events.push({ type: 'failed', order: orderId, at: now, occurrence, notes });
+      const [occurrence, notes] =
+        OCCURRENCES[Math.floor(random() * OCCURRENCES.length)];
+      events.push({
+        type: "failed",
+        order: orderId,
+        at: now,
+        occurrence,
+        notes,
+      });
     } else {
-      events.push({ type: 'delivered', order: orderId, at: now });
+      events.push({ type: "delivered", order: orderId, at: now });
     }
   }
 
   drive(DEPOT);
-  events.push({ type: 'route_finished', order: null, at: now });
+  events.push({ type: "route_finished", order: null, at: now });
 
   // Ao vivo, só existe o que já aconteceu até este instante.
   const agora = Date.now();
   const happened = live ? events.filter((event) => event.at <= agora) : events;
   const recorded = live ? pings.filter((ping) => ping.at <= agora) : pings;
-  const finished = happened.some((event) => event.type === 'route_finished');
+  const finished = happened.some((event) => event.type === "route_finished");
 
   for (const event of happened) {
-    if (event.type === 'failed') {
-      await run(`UPDATE "order" SET status = 'failed' WHERE order_id = ?`, [event.order]);
-    }
-    if (event.type === 'delivered') {
-      await run(`UPDATE "order" SET status = 'delivered', delivered_at = ? WHERE order_id = ?`, [
-        sqlDate(event.at),
+    if (event.type === "failed") {
+      await run(`UPDATE "order" SET status = 'failed' WHERE order_id = ?`, [
         event.order,
       ]);
     }
+    if (event.type === "delivered") {
+      await run(
+        `UPDATE "order" SET status = 'delivered', delivered_at = ? WHERE order_id = ?`,
+        [sqlDate(event.at), event.order],
+      );
+    }
   }
 
-  await run('UPDATE route SET status = ?, started_at = ?, finished_at = ? WHERE route_id = ?', [
-    finished ? 'completed' : 'active',
-    sqlDate(startedAt),
-    finished ? sqlDate(now) : null,
-    routeId,
-  ]);
+  await run(
+    "UPDATE route SET status = ?, started_at = ?, finished_at = ? WHERE route_id = ?",
+    [
+      finished ? "completed" : "active",
+      sqlDate(startedAt),
+      finished ? sqlDate(now) : null,
+      routeId,
+    ],
+  );
 
   for (const event of happened) {
     await run(
@@ -351,32 +455,44 @@ async function createRoute({ idCompany, driver, vehicleId, offset, random, live 
     );
   }
 
-  await run('BEGIN');
-  for (const ping of recorded) {
-    await run(
-      `INSERT INTO route_location_ping
+  await db.transaction(async () => {
+    for (const ping of recorded) {
+      await run(
+        `INSERT INTO route_location_ping
          (id_company, route_id, latitude, longitude, accuracy_m, speed_mps, recorded_at, received_at, client_ping_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [idCompany, routeId, ping.lat, ping.lng, 6 + random() * 8, null, sqlDate(ping.at), sqlDate(ping.at + 30_000), randomUUID()],
-    );
-  }
-  await run('COMMIT');
+        [
+          idCompany,
+          routeId,
+          ping.lat,
+          ping.lng,
+          6 + random() * 8,
+          null,
+          sqlDate(ping.at),
+          sqlDate(ping.at + 30_000),
+          randomUUID(),
+        ],
+      );
+    }
+  });
 
-  const failed = happened.filter((event) => event.type === 'failed').length;
+  const failed = happened.filter((event) => event.type === "failed").length;
   console.log(
     `  Rota #${routeId} · ${day} · ${driver.name} · ${planned.length} paradas` +
-      (failed ? ` · ${failed} não entregue(s)` : '') +
+      (failed ? ` · ${failed} não entregue(s)` : "") +
       ` · ${recorded.length} pontos de GPS` +
-      (live ? ' · EM ANDAMENTO' : ''),
+      (live ? " · EM ANDAMENTO" : ""),
   );
 }
 
 async function main() {
   const args = parseArgs(process.argv);
 
-  const hasTable = await get("SELECT 1 AS ok FROM sqlite_master WHERE name = 'route_location_ping'");
-  if (!hasTable) {
-    throw new Error('As tabelas novas ainda não existem. Suba o backend uma vez (npm run start:dev) e rode de novo.');
+  db = await openDb();
+  if (!(await db.tableExists("route_location_ping"))) {
+    throw new Error(
+      "O esquema do banco está desatualizado. Rode `npm run migration:run` e tente de novo.",
+    );
   }
 
   if (args.limpar) {
@@ -385,14 +501,19 @@ async function main() {
   }
 
   const company = args.empresa
-    ? await get('SELECT id_company FROM company WHERE id_company = ?', [args.empresa])
-    : await get('SELECT id_company FROM company ORDER BY id_company LIMIT 1');
-  if (!company) throw new Error('Nenhuma empresa encontrada.');
+    ? await get("SELECT id_company FROM company WHERE id_company = ?", [
+        args.empresa,
+      ])
+    : await get("SELECT id_company FROM company ORDER BY id_company LIMIT 1");
+  if (!company) throw new Error("Nenhuma empresa encontrada.");
   const idCompany = company.id_company;
 
   const drivers = [];
   for (const name of DEMO_DRIVERS) {
-    let driver = await get('SELECT driver_id, name FROM driver WHERE id_company = ? AND name = ?', [idCompany, name]);
+    let driver = await get(
+      "SELECT driver_id, name FROM driver WHERE id_company = ? AND name = ?",
+      [idCompany, name],
+    );
     if (!driver) {
       const created = await run(
         "INSERT INTO driver (id_company, name, status, created_by) VALUES (?, ?, 'available', ?)",
@@ -403,12 +524,18 @@ async function main() {
     drivers.push(driver);
   }
 
-  const vehicle = await get('SELECT vehicle_id FROM vehicle WHERE id_company = ? ORDER BY vehicle_id LIMIT 1', [idCompany]);
+  const vehicle = await get(
+    "SELECT vehicle_id FROM vehicle WHERE id_company = ? ORDER BY vehicle_id LIMIT 1",
+    [idCompany],
+  );
   const total = Math.min(Math.max(Number(args.rotas) || 6, 1), 40);
-  const existing = await get('SELECT COUNT(*) AS total FROM route WHERE created_by = ?', [AUTHOR]);
+  const existing = await get(
+    "SELECT COUNT(*) AS total FROM route WHERE created_by = ?",
+    [AUTHOR],
+  );
   const random = createRandom(20261012 + existing.total);
 
-  if (args['ao-vivo']) {
+  if (args["ao-vivo"]) {
     console.log(`Empresa ${idCompany}: criando uma rota em andamento\n`);
     await createRoute({
       idCompany,
@@ -418,11 +545,15 @@ async function main() {
       random,
       live: true,
     });
-    console.log('\nAbra Acompanhamento no sistema web. A posição não avança sozinha: é uma foto deste instante.');
+    console.log(
+      "\nAbra Acompanhamento no sistema web. A posição não avança sozinha: é uma foto deste instante.",
+    );
     return;
   }
 
-  console.log(`Empresa ${idCompany}: criando ${total} rota(s) executada(s) de demonstração\n`);
+  console.log(
+    `Empresa ${idCompany}: criando ${total} rota(s) executada(s) de demonstração\n`,
+  );
   for (let index = 0; index < total; index += 1) {
     await createRoute({
       idCompany,
@@ -434,13 +565,17 @@ async function main() {
     });
   }
 
-  console.log('\nAbra Indicadores → Execução em campo no sistema web para ver o resultado.');
-  console.log('Para apagar estes dados: node scripts/seed-history-demo.js --limpar');
+  console.log(
+    "\nAbra Indicadores → Execução em campo no sistema web para ver o resultado.",
+  );
+  console.log(
+    "Para apagar estes dados: node scripts/seed-history-demo.js --limpar",
+  );
 }
 
 main()
   .catch((error) => {
-    console.error('Falha:', error.message);
+    console.error("Falha:", error.message);
     process.exitCode = 1;
   })
-  .finally(() => db.close());
+  .finally(() => db && db.close());
