@@ -45,6 +45,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Com DEPLOY_TARGET=hostinger quem faz o deploy é o deploy-hostinger.yml.
+    if: ${{ vars.DEPLOY_TARGET != 'hostinger' }}
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}

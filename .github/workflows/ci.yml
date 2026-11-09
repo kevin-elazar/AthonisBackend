@@ -130,14 +130,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # O destino do deploy vem da variável do repositório DEPLOY_TARGET:
+  # "hostinger" usa SSH (deploy-hostinger.yml); qualquer outro valor, o Azure.
   deploy-staging:
-    name: Deploy em staging
+    name: Deploy em staging (Azure)
     needs: imagem
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/desenvMobile' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/desenvMobile' && vars.DEPLOY_TARGET != 'hostinger' }}
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/deploy.yml
+    with:
+      ambiente: staging
+      imagem: sha-${{ github.sha }}
+
+  deploy-staging-hostinger:
+    name: Deploy em staging (Hostinger)
+    needs: imagem
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/desenvMobile' && vars.DEPLOY_TARGET == 'hostinger' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-hostinger.yml
+    secrets: inherit
     with:
       ambiente: staging
       imagem: sha-${{ github.sha }}

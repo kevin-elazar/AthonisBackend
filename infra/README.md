@@ -3,6 +3,9 @@
 Produção e staging rodam numa VM Linux no **Azure** (assinatura Azure for
 Students), com **Docker Compose**. Nada de Vercel, Netlify ou Render.
 
+> **Hostinger:** para rodar a mesma stack numa VPS da Hostinger, com deploy
+> por SSH, veja [`HOSTINGER.md`](HOSTINGER.md).
+
 ```text
 Internet ──HTTPS──► Caddy (Let's Encrypt)
                       ├─ api.<dominio>          → api           ┐

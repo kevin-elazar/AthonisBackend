@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Roda DENTRO da VM (via `az vm run-command`, chamado pelo azure-provision.sh).
+# Roda DENTRO da VM, como root: no Azure via `az vm run-command` (chamado pelo
+# azure-provision.sh); na Hostinger, chamado pelo hostinger-setup.sh.
 # Gera infra/.env e os arquivos de ambiente das APIs com senhas aleatórias,
 # sem sobrescrever o que já existe, e sobe os serviços de base.
 #
@@ -23,6 +24,14 @@ else
   sed -i "s|^BASE_DOMAIN=.*|BASE_DOMAIN=${BASE_DOMAIN}|" .env
   echo ".env já existia; só o domínio foi atualizado"
 fi
+
+# Valores opcionais vindos do ambiente (o hostinger-setup.sh usa isto para
+# apontar a branch da infra, o e-mail do Let's Encrypt e as imagens).
+for var in ACME_EMAIL INFRA_BRANCH API_IMAGE WEB_IMAGE; do
+  valor="${!var:-}"
+  [ -n "$valor" ] || continue
+  if grep -qE "^${var}=" .env; then sed -i "s|^${var}=.*|${var}=${valor}|" .env; else echo "${var}=${valor}" >> .env; fi
+done
 
 for ambiente in production staging; do
   arquivo="env/api.${ambiente}.env"

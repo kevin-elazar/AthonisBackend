@@ -1,0 +1,105 @@
+# Entrega contínua da API numa VPS da Hostinger (alternativa ao deploy.yml,
+# que é do Azure). Fica ativo quando a variável do repositório
+# DEPLOY_TARGET = hostinger.
+#
+#   - CI verde na branch desenvMobile  -> atualiza STAGING (chamado pelo ci.yml)
+#   - Release publicada (tag v*)        -> atualiza PRODUÇÃO com a imagem do commit da tag
+#   - Manual (workflow_dispatch)        -> escolhe ambiente e imagem
+#
+# Entra na VPS por SSH com o usuário `deploy`, cuja chave só consegue rodar
+# infra/ssh-gate.sh -> infra/deploy.sh (baixa a imagem, reinicia o serviço,
+# espera o /health e volta para a versão anterior se falhar).
+#
+# Secrets: VPS_HOST, VPS_SSH_KEY, VPS_KNOWN_HOSTS e (opcional) VPS_PORT.
+# Variáveis: DEPLOY_TARGET=hostinger e BASE_DOMAIN. Veja infra/HOSTINGER.md.
+name: Deploy (Hostinger)
+
+on:
+  workflow_call:
+    inputs:
+      ambiente:
+        type: string
+        default: staging
+      imagem:
+        type: string
+        required: false
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: Ambiente
+        type: choice
+        options: [staging, production]
+        default: staging
+      imagem:
+        description: Tag da imagem (ex. sha-<commit>, staging, main)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-hostinger-api-${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ vars.DEPLOY_TARGET == 'hostinger' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+      url: https://${{ (inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging') == 'production' && 'api' || 'staging-api' }}.${{ vars.BASE_DOMAIN }}
+    env:
+      AMBIENTE: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
+      IMAGEM: ${{ inputs.imagem || format('sha-{0}', github.sha) }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+    steps:
+      - name: Conferir configuração
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+        run: |
+          faltando=""
+          [ -n "$VPS_HOST" ]        || faltando="$faltando VPS_HOST"
+          [ -n "$VPS_SSH_KEY" ]     || faltando="$faltando VPS_SSH_KEY"
+          [ -n "$VPS_KNOWN_HOSTS" ] || faltando="$faltando VPS_KNOWN_HOSTS"
+          [ -n "$BASE_DOMAIN" ]     || faltando="$faltando BASE_DOMAIN"
+          if [ -n "$faltando" ]; then
+            echo "::error::Configuração da Hostinger incompleta:$faltando (veja infra/HOSTINGER.md)."; exit 1
+          fi
+
+      - name: Preparar SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Atualizar a VPS (${{ env.AMBIENTE }} <- ${{ env.IMAGEM }})
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" \
+              -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20 \
+              "deploy@$VPS_HOST" "deploy api $AMBIENTE $IMAGEM" | tee saida.log
+          grep -q "DEPLOY_OK" saida.log || { echo "::error::A VPS não confirmou o deploy."; exit 1; }
+
+      - name: Conferir /health de fora
+        run: |
+          prefixo=api; [ "$AMBIENTE" = production ] || prefixo=staging-api
+          url="https://$prefixo.${{ vars.BASE_DOMAIN }}"
+          for i in $(seq 1 20); do
+            curl -fsS "$url/health" && exit 0
+            sleep 6
+          done
+          echo "::error::$url/health não respondeu"; exit 1
+
+      - name: Limpar chave
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
