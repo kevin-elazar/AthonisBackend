@@ -57,6 +57,7 @@ Opções (variáveis antes do `bash`):
 | `INFRA_BRANCH` | `infra/hostinger` (troque para `desenvMobile` depois do merge) |
 | `WEB_IMAGE` | `ghcr.io/gustavojross/athonis-web` |
 | `API_IMAGE` | `ghcr.io/kevin-elazar/athonis-api` |
+| `API_TAG` | `staging` (o CI do backend ainda não publica a tag `main`) |
 | `DEPLOY_PUBKEY` | gera uma chave nova em `/root/athonis-deploy-key` |
 
 **Domínio próprio:** crie no DNS (pode ser o da própria Hostinger) registros
@@ -86,6 +87,11 @@ Environments*); em `production`, ative "Required reviewers" se quiser
 aprovação antes de publicar.
 
 ## 5. Publicar
+
+> **Enquanto a branch `infra/hostinger` não for mergeada:** no front-end, push
+> nela gera a imagem de produção e faz o deploy em `app.<dominio>`. A API roda
+> a imagem `staging` publicada pelo CI do backend; para atualizá-la na VPS:
+> `cd /opt/athonis/infra && ./deploy.sh api production staging`.
 
 | Quando | O que acontece |
 |---|---|

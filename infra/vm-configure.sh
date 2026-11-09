@@ -27,7 +27,7 @@ fi
 
 # Valores opcionais vindos do ambiente (o hostinger-setup.sh usa isto para
 # apontar a branch da infra, o e-mail do Let's Encrypt e as imagens).
-for var in ACME_EMAIL INFRA_BRANCH API_IMAGE WEB_IMAGE; do
+for var in ACME_EMAIL INFRA_BRANCH API_IMAGE WEB_IMAGE API_TAG API_STAGING_TAG; do
   valor="${!var:-}"
   [ -n "$valor" ] || continue
   if grep -qE "^${var}=" .env; then sed -i "s|^${var}=.*|${var}=${valor}|" .env; else echo "${var}=${valor}" >> .env; fi
@@ -51,5 +51,8 @@ done
 
 docker compose up -d caddy postgres prometheus node-exporter grafana
 # APIs e painel sobem quando o CI tiver publicado as imagens (deploy.sh).
-docker compose up -d api api-staging web web-staging 2>/dev/null || echo "imagens das aplicações ainda não publicadas; o primeiro deploy sobe os serviços"
+# Um por vez: uma imagem que ainda não existe não impede as outras de subir.
+for servico in api api-staging web web-staging; do
+  docker compose up -d "$servico" 2>/dev/null || echo "$servico: imagem ainda não publicada; o primeiro deploy sobe o serviço"
+done
 docker compose ps

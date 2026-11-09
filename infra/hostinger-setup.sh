@@ -13,6 +13,8 @@
 #   REPO_URL       repositório do backend
 #   API_IMAGE      imagem da API no GHCR
 #   WEB_IMAGE      imagem do painel (front-end) no GHCR
+#   API_TAG        tag da API em produção (padrão: staging, a única que o CI
+#                  do backend publica hoje; troque para main quando houver)
 #   DEPLOY_PUBKEY  chave pública já existente para o GitHub Actions; sem ela,
 #                  uma chave nova é gerada em /root/athonis-deploy-key
 #
@@ -29,6 +31,7 @@ REPO_URL="${REPO_URL:-https://github.com/kevin-elazar/AthonisBackend.git}"
 export INFRA_BRANCH="${INFRA_BRANCH:-infra/hostinger}"
 export API_IMAGE="${API_IMAGE:-ghcr.io/kevin-elazar/athonis-api}"
 export WEB_IMAGE="${WEB_IMAGE:-ghcr.io/gustavojross/athonis-web}"
+export API_TAG="${API_TAG:-staging}"
 export ACME_EMAIL="${ACME_EMAIL:-}"
 DESTINO=/opt/athonis
 USUARIO=deploy
