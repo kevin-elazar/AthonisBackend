@@ -7,7 +7,8 @@
 #   sudo ACME_EMAIL=voce@exemplo.com bash hostinger-setup.sh
 #
 # Variáveis opcionais (todas têm padrão):
-#   BASE_DOMAIN    domínio base (padrão: <ip-com-hifens>.sslip.io, sem comprar domínio)
+#   BASE_DOMAIN    domínio base (padrão: o hostname srvNNN.hstgr.cloud da VPS, que
+#                  já resolve qualquer subdomínio; senão <ip-com-hifens>.sslip.io)
 #   ACME_EMAIL     e-mail para os avisos do Let's Encrypt
 #   INFRA_BRANCH   branch do backend de onde vem a pasta infra/ (padrão: infra/hostinger)
 #   REPO_URL       repositório do backend
@@ -41,7 +42,16 @@ log() { echo; echo "==> $*"; }
 # IP público: nas VPS da Hostinger ele fica na própria interface de rede.
 IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
 [ -n "$IP" ] || { echo "Não consegui descobrir o IP público; informe BASE_DOMAIN."; exit 1; }
-BASE_DOMAIN="${BASE_DOMAIN:-${IP//./-}.sslip.io}"
+# A Hostinger dá a cada VPS um nome srvNNN.hstgr.cloud com DNS curinga
+# (api.srvNNN.hstgr.cloud etc. já apontam para ela).
+if [ -z "${BASE_DOMAIN:-}" ]; then
+  NOME="$(hostname -f 2>/dev/null || hostname)"
+  if [[ "$NOME" == *.hstgr.cloud ]] && getent ahostsv4 "api.$NOME" | grep -q "^$IP "; then
+    BASE_DOMAIN="$NOME"
+  else
+    BASE_DOMAIN="${IP//./-}.sslip.io"
+  fi
+fi
 
 log "Pacotes do sistema"
 export DEBIAN_FRONTEND=noninteractive

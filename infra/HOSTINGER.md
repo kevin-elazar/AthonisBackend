@@ -53,7 +53,7 @@ Opções (variáveis antes do `bash`):
 
 | Variável | Padrão |
 |---|---|
-| `BASE_DOMAIN` | `<ip-com-hifens>.sslip.io`: funciona sem comprar domínio |
+| `BASE_DOMAIN` | o hostname `srvNNN.hstgr.cloud` da VPS (já tem DNS curinga); senão `<ip-com-hifens>.sslip.io` |
 | `INFRA_BRANCH` | `infra/hostinger` (troque para `desenvMobile` depois do merge) |
 | `WEB_IMAGE` | `ghcr.io/gustavojross/athonis-web` |
 | `API_IMAGE` | `ghcr.io/kevin-elazar/athonis-api` |
