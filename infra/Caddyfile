@@ -1,4 +1,5 @@
-# Proxy reverso com HTTPS automático (Let's Encrypt).
+# Proxy reverso com HTTPS automático (Let's Encrypt), usado só em servidor
+# sem Coolify (perfil "caddy" do docker-compose.yml).
 # BASE_DOMAIN vem do .env: por exemplo 20-51-10-7.sslip.io (o sslip.io
 # resolve o próprio IP, sem precisar comprar domínio) ou um domínio próprio.
 {

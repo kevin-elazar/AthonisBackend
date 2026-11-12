@@ -1,0 +1,93 @@
+# Liga o Athonis ao proxy (Traefik) do Coolify já instalado na VPS.
+# Usado quando o .env tem COMPOSE_FILE=docker-compose.yml:docker-compose.coolify.yml
+# (o vps-bootstrap.sh grava isso ao detectar o Coolify).
+#
+# O Traefik do Coolify escuta 80/443, emite os certificados Let's Encrypt e
+# só enxerga containers na rede "coolify" com traefik.enable=true. Os nomes
+# dos routers começam com "athonis-" para não colidir com os apps do Coolify.
+# Entrypoints e resolver vêm do .env (o bootstrap lê a configuração do proxy).
+
+x-traefik: &traefik
+  traefik.enable: "true"
+  traefik.docker.network: coolify
+
+services:
+  api:
+    networks: [interna, coolify]
+    labels:
+      <<: *traefik
+      traefik.http.routers.athonis-api.rule: Host(`api.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-api.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-https}
+      traefik.http.routers.athonis-api.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.athonis-api.middlewares: athonis-seguranca,athonis-sem-metrics
+      traefik.http.routers.athonis-api-http.rule: Host(`api.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-api-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
+      traefik.http.routers.athonis-api-http.middlewares: athonis-https
+      traefik.http.services.athonis-api.loadbalancer.server.port: "8080"
+      # Middlewares compartilhados (definidos aqui, usados por todos os serviços):
+      traefik.http.middlewares.athonis-https.redirectscheme.scheme: https
+      traefik.http.middlewares.athonis-https.redirectscheme.permanent: "true"
+      traefik.http.middlewares.athonis-seguranca.headers.stsSeconds: "31536000"
+      traefik.http.middlewares.athonis-seguranca.headers.stsIncludeSubdomains: "true"
+      traefik.http.middlewares.athonis-seguranca.headers.contentTypeNosniff: "true"
+      traefik.http.middlewares.athonis-seguranca.headers.referrerPolicy: strict-origin-when-cross-origin
+      traefik.http.middlewares.athonis-comprimir.compress: "true"
+      # /metrics só é lido pelo Prometheus, pela rede interna: de fora vira 404.
+      traefik.http.middlewares.athonis-sem-metrics.replacepathregex.regex: ^/metrics.*
+      traefik.http.middlewares.athonis-sem-metrics.replacepathregex.replacement: /__sem-acesso
+
+  api-staging:
+    networks: [interna, coolify]
+    labels:
+      <<: *traefik
+      traefik.http.routers.athonis-api-staging.rule: Host(`staging-api.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-api-staging.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-https}
+      traefik.http.routers.athonis-api-staging.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.athonis-api-staging.middlewares: athonis-seguranca,athonis-sem-metrics
+      traefik.http.routers.athonis-api-staging-http.rule: Host(`staging-api.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-api-staging-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
+      traefik.http.routers.athonis-api-staging-http.middlewares: athonis-https
+      traefik.http.services.athonis-api-staging.loadbalancer.server.port: "8080"
+
+  web:
+    networks: [interna, coolify]
+    labels:
+      <<: *traefik
+      traefik.http.routers.athonis-web.rule: Host(`app.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-web.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-https}
+      traefik.http.routers.athonis-web.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.athonis-web.middlewares: athonis-seguranca,athonis-comprimir
+      traefik.http.routers.athonis-web-http.rule: Host(`app.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-web-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
+      traefik.http.routers.athonis-web-http.middlewares: athonis-https
+      traefik.http.services.athonis-web.loadbalancer.server.port: "3000"
+
+  web-staging:
+    networks: [interna, coolify]
+    labels:
+      <<: *traefik
+      traefik.http.routers.athonis-web-staging.rule: Host(`staging-app.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-web-staging.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-https}
+      traefik.http.routers.athonis-web-staging.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.athonis-web-staging.middlewares: athonis-seguranca,athonis-comprimir
+      traefik.http.routers.athonis-web-staging-http.rule: Host(`staging-app.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-web-staging-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
+      traefik.http.routers.athonis-web-staging-http.middlewares: athonis-https
+      traefik.http.services.athonis-web-staging.loadbalancer.server.port: "3000"
+
+  grafana:
+    networks: [interna, coolify]
+    labels:
+      <<: *traefik
+      traefik.http.routers.athonis-grafana.rule: Host(`grafana.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-grafana.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-https}
+      traefik.http.routers.athonis-grafana.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.athonis-grafana.middlewares: athonis-seguranca
+      traefik.http.routers.athonis-grafana-http.rule: Host(`grafana.${BASE_DOMAIN}`)
+      traefik.http.routers.athonis-grafana-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
+      traefik.http.routers.athonis-grafana-http.middlewares: athonis-https
+      traefik.http.services.athonis-grafana.loadbalancer.server.port: "3000"
+
+networks:
+  coolify:
+    external: true

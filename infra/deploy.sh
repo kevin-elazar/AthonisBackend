@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Atualiza um serviço do Athonis na VM. Chamado pelo GitHub Actions via
-# `az vm run-command` (sem SSH) ou à mão, como root, na própria VM:
+# Atualiza um serviço do Athonis no servidor. Chamado pelo runner do GitHub
+# Actions instalado na VPS (sudo restrito a este script) ou à mão, como root:
 #
 #   /opt/athonis/infra/deploy.sh <api|web> <staging|production> <tag-da-imagem>
 #   ex.: deploy.sh api staging sha-3f2a9c1...

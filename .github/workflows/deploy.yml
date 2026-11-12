@@ -5,10 +5,14 @@
 #   - Release publicada (tag v*)        -> atualiza PRODUÇÃO com a imagem do commit da tag
 #   - Manual (workflow_dispatch)        -> escolhe ambiente e imagem
 #
-# Sem SSH: o GitHub entra no Azure por OIDC (federated credential, nenhuma
-# senha guardada) e pede à VM, pelo `az vm run-command`, que rode
-# infra/deploy.sh. O script baixa a imagem do GHCR, reinicia só o serviço e
-# espera o /health responder; se não responder, volta para a imagem anterior.
+# Sem SSH e sem senha guardada no GitHub: um runner do GitHub Actions instalado
+# na VPS (infra/vps-bootstrap.sh) abre a conexão com o GitHub, pega este job e
+# roda infra/deploy.sh. O usuário do runner só tem permissão de sudo para esse
+# script. O deploy.sh baixa a imagem do GHCR, reinicia só o serviço e espera
+# ficar saudável; se não ficar, volta para a imagem anterior.
+#
+# Enquanto a variável DEPLOY_HABILITADO não for "true" (runner ainda não
+# instalado), o deploy é pulado em vez de ficar esperando um runner.
 name: Deploy
 
 on:
@@ -37,7 +41,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: deploy-api-${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
@@ -45,7 +48,9 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    if: ${{ vars.DEPLOY_HABILITADO == 'true' }}
+    # Runner da VPS (nunca roda em pull request: só push, release e manual).
+    runs-on: [self-hosted, athonis-deploy]
     environment:
       name: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
       url: ${{ (inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging') == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}
@@ -53,37 +58,24 @@ jobs:
       AMBIENTE: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
       IMAGEM: ${{ inputs.imagem || format('sha-{0}', github.sha) }}
     steps:
-      - name: Conferir configuração
+      - name: Atualizar o servidor (${{ env.AMBIENTE }} <- ${{ env.IMAGEM }})
         run: |
-          for v in "${{ vars.AZURE_CLIENT_ID }}" "${{ vars.AZURE_TENANT_ID }}" "${{ vars.AZURE_SUBSCRIPTION_ID }}" "${{ vars.AZURE_RESOURCE_GROUP }}" "${{ vars.AZURE_VM_NAME }}"; do
-            if [ -z "$v" ]; then
-              echo "::error::Variáveis do Azure não configuradas (veja infra/README.md)."; exit 1
-            fi
-          done
+          set -o pipefail
+          sudo -n /opt/athonis/infra/deploy.sh api "$AMBIENTE" "$IMAGEM" 2>&1 | tee deploy.log
+          grep -q "DEPLOY_OK" deploy.log || { echo "::error::O servidor não confirmou o deploy."; exit 1; }
 
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Atualizar a VM (${{ env.AMBIENTE }} <- ${{ env.IMAGEM }})
-        run: |
-          saida=$(az vm run-command invoke \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}" \
-            --command-id RunShellScript \
-            --scripts "/opt/athonis/infra/deploy.sh api $AMBIENTE $IMAGEM" \
-            --query 'value[0].message' -o tsv)
-          echo "$saida"
-          echo "$saida" | grep -q "DEPLOY_OK" || { echo "::error::A VM não confirmou o deploy."; exit 1; }
-
+  conferir:
+    name: Conferir /health de fora
+    needs: deploy
+    runs-on: ubuntu-latest
+    env:
+      URL: ${{ (inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging') == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}
+    steps:
       - name: Conferir /health de fora
         run: |
-          url="${{ env.AMBIENTE == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}"
-          [ -z "$url" ] && { echo "::warning::URL do ambiente não configurada; pulando."; exit 0; }
+          [ -z "$URL" ] && { echo "::warning::URL do ambiente não configurada; pulando."; exit 0; }
           for i in $(seq 1 20); do
-            curl -fsS "$url/health" && exit 0
+            curl -fsS "$URL/health" && exit 0
             sleep 6
           done
-          echo "::error::$url/health não respondeu"; exit 1
+          echo "::error::$URL não respondeu"; exit 1

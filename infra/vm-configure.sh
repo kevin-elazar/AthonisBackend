@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Roda DENTRO da VM (via `az vm run-command`, chamado pelo azure-provision.sh).
+# Roda DENTRO do servidor (chamado pelo vps-bootstrap.sh).
 # Gera infra/.env e os arquivos de ambiente das APIs com senhas aleatórias,
 # sem sobrescrever o que já existe, e sobe os serviços de base.
 #
@@ -40,7 +40,10 @@ done
 # precisa existir porque é montado no container.
 [ -f secrets/google-service-account.json ] || { echo '{}' > secrets/google-service-account.json; chmod 600 secrets/google-service-account.json; }
 
-docker compose up -d caddy postgres prometheus node-exporter grafana
+# SUBIR=0: quem chamou (vps-bootstrap.sh) ainda ajusta o proxy e sobe depois.
+[ "${SUBIR:-1}" = 0 ] && exit 0
+docker compose up -d postgres prometheus node-exporter grafana
+grep -qE '^COMPOSE_PROFILES=.*caddy' .env && docker compose up -d caddy
 # APIs e painel sobem quando o CI tiver publicado as imagens (deploy.sh).
 docker compose up -d api api-staging web web-staging 2>/dev/null || echo "imagens das aplicações ainda não publicadas; o primeiro deploy sobe os serviços"
 docker compose ps

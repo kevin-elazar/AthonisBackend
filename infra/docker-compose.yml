@@ -1,6 +1,6 @@
-# Produção e staging do Athonis numa VM (Azure), com Docker Compose.
+# Produção e staging do Athonis numa VPS Linux, com Docker Compose.
 #
-#   Caddy (HTTPS automático, Let's Encrypt)
+#   Proxy com HTTPS automático (Let's Encrypt)
 #     ├── api.<BASE_DOMAIN>          -> api            (produção)
 #     ├── app.<BASE_DOMAIN>          -> web            (produção)
 #     ├── staging-api.<BASE_DOMAIN>  -> api-staging
@@ -8,6 +8,11 @@
 #     └── grafana.<BASE_DOMAIN>      -> grafana
 #   PostgreSQL (bancos athonis e athonis_staging, volume persistente)
 #   Prometheus (lê /metrics das duas APIs e o node-exporter) + Grafana
+#
+# O proxy é escolhido no .env (COMPOSE_FILE / COMPOSE_PROFILES):
+#   - servidor que já tem Coolify (a VPS da Hostinger): o Traefik do Coolify
+#     ocupa 80/443 e o docker-compose.coolify.yml liga os serviços a ele;
+#   - servidor limpo: o perfil "caddy" sobe o Caddy abaixo (Caddyfile).
 #
 # As imagens vêm do GitHub Container Registry, publicadas pelo CI. As tags em
 # uso ficam no .env desta pasta e são trocadas por deploy.sh.
@@ -38,6 +43,7 @@ x-web: &web
 services:
   caddy:
     image: caddy:2.8-alpine
+    profiles: [caddy]
     restart: unless-stopped
     ports:
       - "80:80"
