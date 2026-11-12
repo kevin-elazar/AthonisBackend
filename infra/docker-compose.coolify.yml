@@ -10,6 +10,17 @@
 x-traefik: &traefik
   traefik.enable: "true"
   traefik.docker.network: coolify
+  # Middlewares compartilhados. Vão em todos os serviços (definições iguais
+  # não conflitam no Traefik), assim funcionam com qualquer serviço parado.
+  traefik.http.middlewares.athonis-https.redirectscheme.scheme: https
+  traefik.http.middlewares.athonis-https.redirectscheme.permanent: "true"
+  traefik.http.middlewares.athonis-seguranca.headers.stsSeconds: "31536000"
+  traefik.http.middlewares.athonis-seguranca.headers.stsIncludeSubdomains: "true"
+  traefik.http.middlewares.athonis-seguranca.headers.contentTypeNosniff: "true"
+  traefik.http.middlewares.athonis-seguranca.headers.referrerPolicy: strict-origin-when-cross-origin
+  traefik.http.middlewares.athonis-comprimir.compress: "true"
+  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.regex: ^/metrics.*
+  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.replacement: /__sem-acesso
 
 services:
   api:
@@ -24,17 +35,6 @@ services:
       traefik.http.routers.athonis-api-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
       traefik.http.routers.athonis-api-http.middlewares: athonis-https
       traefik.http.services.athonis-api.loadbalancer.server.port: "8080"
-      # Middlewares compartilhados (definidos aqui, usados por todos os serviços):
-      traefik.http.middlewares.athonis-https.redirectscheme.scheme: https
-      traefik.http.middlewares.athonis-https.redirectscheme.permanent: "true"
-      traefik.http.middlewares.athonis-seguranca.headers.stsSeconds: "31536000"
-      traefik.http.middlewares.athonis-seguranca.headers.stsIncludeSubdomains: "true"
-      traefik.http.middlewares.athonis-seguranca.headers.contentTypeNosniff: "true"
-      traefik.http.middlewares.athonis-seguranca.headers.referrerPolicy: strict-origin-when-cross-origin
-      traefik.http.middlewares.athonis-comprimir.compress: "true"
-      # /metrics só é lido pelo Prometheus, pela rede interna: de fora vira 404.
-      traefik.http.middlewares.athonis-sem-metrics.replacepathregex.regex: ^/metrics.*
-      traefik.http.middlewares.athonis-sem-metrics.replacepathregex.replacement: /__sem-acesso
 
   api-staging:
     networks: [interna, coolify]
