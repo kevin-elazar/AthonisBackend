@@ -139,7 +139,10 @@ for repo in $RUNNER_REPOS; do
     continue
   fi
   printf '\nToken de registro do runner para %s/%s (Enter vazio pula): ' "$GITHUB_OWNER" "$repo"
+  # Terminais web às vezes mandam o Enter como \r: normaliza o tty e limpa o valor.
+  stty sane </dev/tty 2>/dev/null || true
   read -rs token </dev/tty || token=""
+  token="$(printf '%s' "$token" | tr -d '\r\n[:space:]')"
   echo
   [ -n "$token" ] || { echo "pulado: $repo"; continue; }
   mkdir -p "$pasta"
