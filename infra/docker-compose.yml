@@ -29,7 +29,9 @@ x-api: &api
     NODE_ENV: production
     PORT: 8080
     DB_TYPE: postgres
-    DB_HOST: postgres
+    # Nome único: API, painel e Grafana também estão na rede do Coolify, onde
+    # "postgres" é o banco do próprio Coolify.
+    DB_HOST: athonis-postgres
     DB_PORT: 5432
     DB_USER: ${POSTGRES_USER:-athonis}
     DB_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
@@ -73,7 +75,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks: [interna]
+    networks:
+      interna:
+        aliases: [athonis-postgres]
 
   api:
     <<: *api
@@ -116,7 +120,9 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    networks: [interna]
+    networks:
+      interna:
+        aliases: [athonis-prometheus]
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
