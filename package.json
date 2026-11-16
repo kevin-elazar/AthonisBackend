@@ -21,7 +21,8 @@
     "migration:revert": "npm run typeorm -- migration:revert",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:e2e:pg": "cross-env TEST_DB=postgres jest --config ./jest-e2e.json --runInBand",
-    "lint": "eslint src test scripts"
+    "lint": "eslint src test scripts",
+    "seed:pilot": "node scripts/seed-pilot-data.js"
   },
   "keywords": [],
   "author": "Kevin Chedid El Azar",
