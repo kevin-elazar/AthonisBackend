@@ -25,7 +25,10 @@ if (!PASSWORD) {
 
 let token = '';
 
-async function api(method, path, body) {
+const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A API limita requisições por minuto: em 429, espera e tenta de novo. */
+async function api(method, path, body, tentativa = 1) {
   const response = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: {
@@ -34,6 +37,12 @@ async function api(method, path, body) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (response.status === 429 && tentativa <= 5) {
+    const segundos = Number(response.headers.get('retry-after')) || 30;
+    console.log(`limite de requisições; esperando ${segundos}s`);
+    await espera(segundos * 1000);
+    return api(method, path, body, tentativa + 1);
+  }
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
@@ -146,7 +155,8 @@ async function main() {
       registro = await api('POST', '/clients', cliente);
       console.log(`cliente criado: ${cliente.name}`);
     }
-    clientes.push(registro);
+    // A listagem não traz todos os campos: o endereço vem daqui, o id de lá.
+    clientes.push({ ...cliente, client_id: registro.client_id });
   }
 
   const pedidos = await listar('/orders');
