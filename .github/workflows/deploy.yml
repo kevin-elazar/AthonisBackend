@@ -56,7 +56,8 @@ jobs:
       url: ${{ (inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging') == 'production' && vars.PRODUCTION_API_URL || vars.STAGING_API_URL }}
     env:
       AMBIENTE: ${{ inputs.ambiente || (github.event_name == 'release' && 'production') || 'staging' }}
-      IMAGEM: ${{ inputs.imagem || format('sha-{0}', github.sha) }}
+      # Release: a imagem com a tag da versão, gerada pelo CI no push da tag.
+      IMAGEM: ${{ inputs.imagem || (github.event_name == 'release' && github.event.release.tag_name) || format('sha-{0}', github.sha) }}
     steps:
       - name: Atualizar o servidor (${{ env.AMBIENTE }} <- ${{ env.IMAGEM }})
         run: |
