@@ -20,9 +20,13 @@ Internet ──HTTPS──► Traefik do Coolify (ou Caddy)
                       └─ grafana.<dominio>      → Grafana ◄── Prometheus ◄── /metrics (APIs) + node-exporter (servidor)
 ```
 
-Domínio: `187-53-99-235.sslip.io` (o sslip.io resolve o próprio IP, sem
-comprar domínio). Para usar um domínio próprio, troque `BASE_DOMAIN` no `.env`
-do servidor e as variáveis `*_URL` do GitHub.
+Domínio: `athonis.seletohub.cloud`, subdomínio do domínio de quem cede a VPS,
+com um registro DNS `A *.athonis → 187.53.99.235` na Hostinger. O sslip.io
+(IP no nome) funcionava, mas filtros corporativos (FortiGuard) bloqueiam
+domínios de DNS dinâmico. Para trocar de domínio: novo registro DNS, troque
+`BASE_DOMAIN` no `.env` do servidor e nos `env/api.*.env`, rode
+`docker compose up -d`, atualize as variáveis `*_URL` do GitHub e gere de novo
+o painel (a URL da API entra no build) e o APK (`eas.json`).
 
 | Arquivo | Papel |
 |---|---|
