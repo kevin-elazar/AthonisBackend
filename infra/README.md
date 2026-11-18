@@ -140,8 +140,20 @@ docker compose logs --tail 100 api   # logs da API de produção
 
 ## Monitoramento
 
+**Labels do Traefik: nunca mude o valor de um middleware publicado.** Todos
+os containers (APIs, painéis e Grafana, de staging e de produção) repetem os
+mesmos labels de middleware (`x-traefik` em `docker-compose.coolify.yml`). Se
+um container recriado define um middleware com valor diferente dos que já
+estão rodando, o Traefik registra *"middleware defined multiple times with
+different configurations"*, desliga o middleware e derruba todas as rotas que
+o usam, inclusive as de produção. Foi o que tirou as duas APIs do ar em
+18/11/2026: só o painel de staging ganhou a regex nova de `athonis-sem-metrics`.
+Para mudar um middleware, crie outro com nome novo e acrescente-o aos routers;
+o antigo sai só depois que todos os containers forem recriados. Diagnóstico:
+`docker logs coolify-proxy --since 30m | grep ERR`.
+
 O `/metrics` das APIs não sai para a internet: o Traefik (`docker-compose.coolify.yml`)
-e o Caddy bloqueiam o caminho sem diferenciar maiúsculas (`(?i)^/metrics`),
+e o Caddy bloqueiam o caminho sem diferenciar maiúsculas (`(?i)^/metrics`, middleware `athonis-sem-metrics-ci`),
 porque o Express atende `/METRICS` igual a `/metrics`. Como segunda barreira,
 `METRICS_TOKEN` (em `env/api.*.env`) faz a API exigir
 `Authorization: Bearer <token>`; o Prometheus manda o token lido de
