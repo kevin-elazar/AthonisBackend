@@ -97,6 +97,48 @@ export function haversineMeters(
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/**
+ * Pontos lidos durante a execução: entre a saída e o encerramento, quando os
+ * dois existem. O aplicativo pode mandar rastro de antes de "iniciar" (o
+ * entregador indo ao depósito) ou de depois de encerrar; nada disso é a rota.
+ */
+export function pingsWithinExecution(
+  pings: MetricsPingInput[],
+  startedAt: Date | null,
+  finishedAt: Date | null,
+): MetricsPingInput[] {
+  if (!startedAt || !finishedAt) return pings;
+  const de = startedAt.getTime();
+  const ate = finishedAt.getTime();
+  if (Number.isNaN(de) || Number.isNaN(ate) || ate < de) return pings;
+  return pings.filter((ping) => {
+    const instante = ping.recorded_at.getTime();
+    return instante >= de && instante <= ate;
+  });
+}
+
+/**
+ * Tamanho da maior subsequência estritamente crescente (O(n log n)).
+ *
+ * Aplicada à sequência planejada na ordem em que as paradas foram visitadas,
+ * diz quantas paradas mantiveram a ordem entre si; as demais são as que
+ * precisariam "mudar de lugar" para a execução seguir o plano.
+ */
+export function longestIncreasingSubsequenceLength(values: number[]): number {
+  const caudas: number[] = [];
+  for (const valor of values) {
+    let baixo = 0;
+    let alto = caudas.length;
+    while (baixo < alto) {
+      const meio = (baixo + alto) >> 1;
+      if (caudas[meio] < valor) baixo = meio + 1;
+      else alto = meio;
+    }
+    caudas[baixo] = valor;
+  }
+  return caudas.length;
+}
+
 /** Pontos aproveitáveis, em ordem de leitura. */
 export function usablePings(pings: MetricsPingInput[]): MetricsPingInput[] {
   return pings
@@ -217,7 +259,11 @@ const minutes = (ms: number) => Math.round((ms / 60000) * 10) / 10;
 const average = (values: number[]): number | null =>
   values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10 : null;
 
-export function computeRouteMetrics(input: MetricsInput): MetricsResult {
+export function computeRouteMetrics(rawInput: MetricsInput): MetricsResult {
+  const input: MetricsInput = {
+    ...rawInput,
+    pings: pingsWithinExecution(rawInput.pings, rawInput.started_at, rawInput.finished_at),
+  };
   const eventsByOrder = new Map<number, MetricsEventInput[]>();
   for (const event of [...input.events].sort(
     (a, b) => a.occurred_at.getTime() - b.occurred_at.getTime(),
@@ -264,17 +310,6 @@ export function computeRouteMetrics(input: MetricsInput): MetricsResult {
     .sort((a, b) => a.actualArrival!.getTime() - b.actualArrival!.getTime());
   const ordemReal = new Map(visitadas.map((item, index) => [item.stop.order_id, index + 1]));
 
-  // Ordem planejada, contando só as paradas visitadas: uma parada pulada não
-  // deve fazer todas as seguintes parecerem fora de ordem.
-  const ordemPlanejada = new Map(
-    [...visitadas]
-      .sort(
-        (a, b) =>
-          (a.stop.planned_sequence ?? Number.MAX_SAFE_INTEGER) -
-          (b.stop.planned_sequence ?? Number.MAX_SAFE_INTEGER),
-      )
-      .map((item, index) => [item.stop.order_id, index + 1]),
-  );
 
   const stops: StopExecution[] = parciais.map((item) => ({
     order_id: item.stop.order_id,
@@ -289,9 +324,16 @@ export function computeRouteMetrics(input: MetricsInput): MetricsResult {
     occurrence_type: item.occurrence_type,
   }));
 
-  const foraDeOrdem = visitadas.filter(
-    (item) => ordemReal.get(item.stop.order_id) !== ordemPlanejada.get(item.stop.order_id),
-  ).length;
+  // Fora de ordem = visitadas − maior subsequência crescente da sequência
+  // planejada na ordem real. Comparar posição a posição contava demais: fazer
+  // a parada 1 por último (2,3,4,5,1) deslocava todas as outras e dava 5,
+  // quando só uma saiu do lugar. Paradas sem sequência planejada não entram
+  // na conta. Uma parada pulada também não pesa, porque só as visitadas contam.
+  const sequenciaPlanejada = visitadas
+    .map((item) => item.stop.planned_sequence)
+    .filter((valor): valor is number => valor != null);
+  const foraDeOrdem =
+    sequenciaPlanejada.length - longestIncreasingSubsequenceLength(sequenciaPlanejada);
 
   const janelas = parciais
     .map((item) => item.window)

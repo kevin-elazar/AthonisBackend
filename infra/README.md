@@ -63,9 +63,34 @@ o painel (a URL da API entra no build) e o APK (`eas.json`).
    imagem anterior. Um segundo job, nas máquinas do GitHub, confere o
    `/health` por fora, via HTTPS.
 
+Detalhes do `deploy.sh`:
+
+- **Infra fixada no commit do deploy.** O `deploy.yml` passa `github.sha`
+  como 4º argumento (`deploy.sh api production v1.2.0 <sha>`); na release é o
+  commit da tag. O script faz `git fetch` e `git checkout --detach <sha>` na
+  pasta do repositório, então o compose, o Caddyfile e o Prometheus que sobem
+  são os daquela versão, não o que estiver na branch. O SHA é validado
+  (`^[0-9a-f]{7,40}$`); se o checkout falhar (por exemplo, arquivo alterado à
+  mão na VPS), o deploy para antes de mexer no `.env`.
+  Sem o 4º argumento (como no deploy do painel, `athonis-front-end`, que
+  chama o script com 3), vale o comportamento antigo: fast-forward da branch
+  `INFRA_BRANCH`. Se um deploy anterior deixou a pasta fixada num commit, ela
+  fica onde está. Staging e produção dividem a mesma pasta: o último deploy
+  com SHA define a infra dos dois.
+- **Um deploy por vez.** O script segura `infra/.deploy.lock` (`flock`)
+  durante todo o processo; um segundo deploy espera até 15 minutos.
+- **Espera a imagem.** Uma release criada logo depois do push da tag pode
+  chegar antes de o CI publicar a imagem: o `docker compose pull` tenta 10
+  vezes, a cada 30 s, antes de desistir e manter a imagem anterior.
+
 Segurança do runner em repositório público: o deploy só roda em push, release
-ou disparo manual (nunca em pull request), e os repositórios exigem aprovação
-para rodar workflows de qualquer contribuidor externo.
+ou disparo manual (nunca em pull request). Como o runner é *self-hosted* e o
+repositório é público, um PR de fork não pode ter workflow rodando sem
+aprovação: em cada repositório, **Settings → Actions → General → "Fork pull
+request workflows from outside collaborators" → "Require approval for all
+outside collaborators"**. É a mitigação para alguém abrir um PR que mude um
+workflow para `runs-on: self-hosted` e execute código na VPS. Conferir essa
+opção sempre que um repositório novo ganhar runner.
 
 A variável `DEPLOY_HABILITADO=true` liga o deploy. Sem ela (servidor ainda
 não instalado), o job é pulado em vez de ficar esperando um runner.
@@ -114,6 +139,23 @@ docker compose logs --tail 100 api   # logs da API de produção
 ```
 
 ## Monitoramento
+
+O `/metrics` das APIs não sai para a internet: o Traefik (`docker-compose.coolify.yml`)
+e o Caddy bloqueiam o caminho sem diferenciar maiúsculas (`(?i)^/metrics`),
+porque o Express atende `/METRICS` igual a `/metrics`. Como segunda barreira,
+`METRICS_TOKEN` (em `env/api.*.env`) faz a API exigir
+`Authorization: Bearer <token>`; o Prometheus manda o token lido de
+`infra/secrets/metrics_token` (`authorization.credentials_file` em
+`prometheus/prometheus.yml`). Numa instalação nova o `vm-configure.sh` gera os
+dois. É opcional: num servidor instalado antes, o `deploy.sh` cria o arquivo
+com um marcador e a API, sem `METRICS_TOKEN`, ignora o cabeçalho. Para ligar
+depois, grave o mesmo valor no arquivo (dono `65534`, `chmod 600`) e em
+`METRICS_TOKEN` dos dois `env/api.*.env`, e rode
+`docker compose up -d prometheus api api-staging`.
+
+Atrás do proxy a API lê o IP do cliente de `X-Forwarded-For`
+(`TRUST_PROXY`, padrão `1` em produção): é o que dá a cada usuário o seu
+próprio limite de requisições, em vez de todos dividirem o do proxy.
 
 - **Grafana** (`https://grafana.<dominio>`): disponibilidade, requisições por
   minuto, taxa de erros 5xx, latência p95 por rota, memória da API e CPU,

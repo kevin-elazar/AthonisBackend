@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { RoutesService } from '@/modules/routes/services/routes.service';
 import { Route } from '@/shared/entities/route.entity';
 import { Order } from '@/shared/entities/order.entity';
@@ -193,6 +193,85 @@ describe('RoutesService', () => {
       // Uma consulta de pedidos para todas as rotas, não uma por rota.
       expect(orderRepository.find).toHaveBeenCalledTimes(1);
       expect(routeRepository.find).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Duplicar toma os pedidos livres da rota cancelada. Entre a consulta e a
+   * gravação outro processo pode levá-los; a transação precisa perceber.
+   */
+  describe('duplicate', () => {
+    const montarDuplicacao = (afetados: number[]) => {
+      const wheres: string[] = [];
+      let chamada = 0;
+      const qb: any = {
+        update: jest.fn(() => qb),
+        set: jest.fn(() => qb),
+        where: jest.fn((sql: string) => {
+          wheres.push(sql);
+          return qb;
+        }),
+        andWhere: jest.fn((sql: string) => {
+          wheres.push(sql);
+          return qb;
+        }),
+        execute: jest.fn(async () => ({ affected: afetados[chamada++] ?? 1 })),
+      };
+      const manager = {
+        create: jest.fn((_entidade: unknown, dados: object) => dados),
+        save: jest.fn(async (dados: object) => ({ ...dados, route_id: 99 })),
+        createQueryBuilder: jest.fn(() => qb),
+      };
+      const devolvidas = [
+        { route_id: 7, order_id: 11, stop_sequence: 1 },
+        { route_id: 7, order_id: 12, stop_sequence: 2 },
+      ];
+      const routeRepo = {
+        findOne: jest.fn().mockResolvedValue({ ...rotaPlanejada, status: 'cancelled' }),
+      };
+      const orderRepo = {
+        find: jest.fn().mockResolvedValue([{ order_id: 11 }, { order_id: 12 }]),
+        count: jest.fn().mockResolvedValue(0),
+      };
+      const exist = { exist: jest.fn().mockResolvedValue(true) };
+      const returnedRepo = {
+        count: jest.fn().mockResolvedValue(2),
+        find: jest.fn().mockResolvedValue(devolvidas),
+      };
+      const dataSource = { transaction: jest.fn(async (cb: (m: unknown) => unknown) => cb(manager)) };
+      const tenant = {
+        getIdCompany: jest.fn().mockReturnValue(1),
+        getUser: jest.fn().mockReturnValue({ email: 'admin@athonis.com' }),
+      };
+
+      const svc = new RoutesService(
+        routeRepo as any,
+        orderRepo as any,
+        exist as any,
+        exist as any,
+        {} as any,
+        returnedRepo as any,
+        { findOne: jest.fn().mockResolvedValue(null) } as any,
+        dataSource as any,
+        tenant as any,
+      );
+      jest.spyOn(svc, 'findOne').mockResolvedValue({ route_id: 99 } as any);
+      return { svc, wheres, qb };
+    };
+
+    it('toma só pedidos ainda livres na fila', async () => {
+      const { svc, wheres, qb } = montarDuplicacao([1, 1]);
+
+      await expect(svc.duplicate(7)).resolves.toMatchObject({ route_id: 99 });
+
+      expect(qb.execute).toHaveBeenCalledTimes(2);
+      expect(wheres).toEqual(expect.arrayContaining(['route_id IS NULL', 'status = :pending']));
+    });
+
+    it('responde 409 e desfaz tudo se outro processo levou um pedido no meio', async () => {
+      const { svc } = montarDuplicacao([1, 0]);
+
+      await expect(svc.duplicate(7)).rejects.toThrow(ConflictException);
     });
   });
 });

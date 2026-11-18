@@ -97,22 +97,35 @@ export class RouteMetricsService {
     });
   }
 
-  /** Calcula e grava, substituindo a consolidação anterior da rota. */
-  async consolidate(routeId: number, idCompany: number): Promise<RouteExecutionMetrics | null> {
-    const result = await this.compute(routeId, idCompany);
+  /** A consolidação gravada da rota, sem recalcular. */
+  async findStored(routeId: number, idCompany: number): Promise<RouteExecutionMetrics | null> {
+    return this.metricsRepository.findOne({ where: { route_id: routeId, id_company: idCompany } });
+  }
+
+  /**
+   * Calcula e grava, substituindo a consolidação anterior da rota.
+   *
+   * A gravação é um upsert sobre o índice único de `route_id`: duas
+   * consolidações simultâneas (o encerramento e um lote de GPS atrasado, ou
+   * duas telas do painel) não disputam mais um "busca e salva" que podia
+   * terminar em violação do índice. `precomputed` evita refazer a conta
+   * quando quem chama já a tem.
+   */
+  async consolidate(
+    routeId: number,
+    idCompany: number,
+    precomputed?: MetricsResult,
+  ): Promise<RouteExecutionMetrics | null> {
+    const result = precomputed ?? (await this.compute(routeId, idCompany));
     if (!result) return null;
 
     const route = await this.routeRepository.findOne({
       where: { route_id: routeId, id_company: idCompany },
       select: ['route_id', 'driver_id'],
     });
-    const existing = await this.metricsRepository.findOne({
-      where: { route_id: routeId, id_company: idCompany },
-    });
 
-    const saved = await this.metricsRepository.save(
-      this.metricsRepository.create({
-        ...(existing ? { id: existing.id } : {}),
+    await this.metricsRepository.upsert(
+      {
         id_company: idCompany,
         route_id: routeId,
         driver_id: route?.driver_id ?? undefined,
@@ -130,8 +143,10 @@ export class RouteMetricsService {
         ping_count: result.ping_count,
         stops: result.stops,
         computed_at: new Date(),
-      }),
+      },
+      { conflictPaths: ['route_id'], skipUpdateIfNoValuesChanged: false },
     );
+    const saved = await this.findStored(routeId, idCompany);
 
     this.logger.log(
       `Rota ${routeId} consolidada: ${result.stops_delivered}/${result.stops_total} entregues, ` +

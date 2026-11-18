@@ -31,3 +31,7 @@ credentials/
 # infra local
 infra/.env
 backups/
+
+# lock do deploy e token do /metrics gerados na VPS
+infra/.deploy.lock
+infra/secrets/metrics_token

@@ -67,7 +67,10 @@ export class RouteExecutionMetrics {
   @Column({ type: 'int', default: 0 })
   stops_failed: number;
 
-  /** Paradas visitadas em posição diferente da planejada. */
+  /**
+   * Paradas que saíram da ordem planejada: visitadas menos a maior subsequência
+   * crescente da sequência planejada na ordem real (2,3,4,5,1 dá 1, não 5).
+   */
   @Column({ type: 'int', default: 0 })
   stops_out_of_order: number;
 

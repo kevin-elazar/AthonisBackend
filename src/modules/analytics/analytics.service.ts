@@ -317,19 +317,18 @@ export class AnalyticsService {
       throw new NotFoundException(`Rota ${routeId} não encontrada`);
     }
 
-    // Rota em andamento é calculada na hora e não fica gravada: os números
-    // ainda vão mudar. A consolidação definitiva acontece no encerramento.
-    const metrics =
-      route.status === 'completed'
-        ? await this.routeMetricsService.consolidate(routeId, idCompany)
-        : await this.routeMetricsService.compute(routeId, idCompany);
-
-    // As paradas ociosas não ficam gravadas na consolidação; são recalculadas
-    // aqui, só para a rota que está sendo aberta no mapa.
-    const computed =
-      route.status === 'completed'
-        ? await this.routeMetricsService.compute(routeId, idCompany)
-        : (metrics as MetricsResult | null);
+    // A conta é feita uma vez por abertura: as paradas ociosas do mapa não
+    // ficam gravadas. Rota em andamento usa o cálculo na hora (os números ainda
+    // vão mudar). Rota encerrada usa a consolidação gravada, que o
+    // encerramento e o rastro atrasado já mantêm em dia; só grava aqui se ela
+    // ainda não existir (rota encerrada pelo escritório).
+    const computed = await this.routeMetricsService.compute(routeId, idCompany);
+    let metrics: MetricsResult | RouteExecutionMetrics | null = computed;
+    if (route.status === 'completed' && computed) {
+      metrics =
+        (await this.routeMetricsService.findStored(routeId, idCompany)) ??
+        (await this.routeMetricsService.consolidate(routeId, idCompany, computed));
+    }
 
     const [orders, events, pings, company] = await Promise.all([
       this.orderRepository.find({

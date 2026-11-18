@@ -23,6 +23,18 @@ import { Roles } from './decorators/roles.decorator';
 import { Public } from './decorators/public.decorator';
 import { AllowDriver } from './decorators/allow-driver.decorator';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { Throttle } from '@nestjs/throttler';
+
+/**
+ * Limite próprio do login, mais apertado que o global: dificulta tentativa de
+ * senha por força bruta a partir de um mesmo IP. Os nomes batem com os
+ * throttlers de app.module.ts.
+ */
+const LOGIN_THROTTLE = {
+  short: { ttl: 1000, limit: 3 },
+  medium: { ttl: 10000, limit: 10 },
+  long: { ttl: 60000, limit: 20 },
+};
 
 @ApiTags('Autenticação')
 @Controller('auth')
@@ -52,6 +64,7 @@ export class AuthController {
 
   @Post('login')
   @Public()
+  @Throttle(LOGIN_THROTTLE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Fazer login' })
   @ApiResponse({ 

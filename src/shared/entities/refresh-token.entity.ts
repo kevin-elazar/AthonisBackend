@@ -34,6 +34,13 @@ export class RefreshToken {
   @Column({ type: DATETIME_TYPE, nullable: true })
   replaced_at?: Date;
 
+  /**
+   * Token emitido na troca. Repetir a troca dentro da tolerância substitui
+   * este sucessor (que nunca chegou ao aparelho) em vez de abrir outra cadeia.
+   */
+  @Column({ type: 'int', nullable: true })
+  replaced_by_id?: number | null;
+
   /** Logout ou revogação pelo escritório. Não tem tolerância. */
   @Column({ type: DATETIME_TYPE, nullable: true })
   revoked_at?: Date;

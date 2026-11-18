@@ -19,7 +19,9 @@ x-traefik: &traefik
   traefik.http.middlewares.athonis-seguranca.headers.contentTypeNosniff: "true"
   traefik.http.middlewares.athonis-seguranca.headers.referrerPolicy: strict-origin-when-cross-origin
   traefik.http.middlewares.athonis-comprimir.compress: "true"
-  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.regex: ^/metrics.*
+  # (?i): o Express casa rotas sem diferenciar maiúsculas, então /METRICS
+  # também chegaria ao endpoint se o bloqueio olhasse só para minúsculas.
+  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.regex: "(?i)^/metrics"
   traefik.http.middlewares.athonis-sem-metrics.replacepathregex.replacement: /__sem-acesso
 
 services:

@@ -9,6 +9,7 @@ import { seedTestUser } from './seed/test-data.seed';
 import { seedDriver, seedRoute } from './seed/driver-route.seed';
 import { Route } from '../src/shared/entities/route.entity';
 import { Order } from '../src/shared/entities/order.entity';
+import { RefreshToken } from '../src/shared/entities/refresh-token.entity';
 
 /**
  * O aplicativo do entregador entra com um login comum. O que estes testes
@@ -211,6 +212,73 @@ describe('Aplicativo do entregador (e2e)', () => {
         .get('/driver/me')
         .set('Authorization', `Bearer ${renovado.body.access_token}`)
         .expect(200);
+    });
+
+    it('repetir a troca dentro da tolerância mantém uma sessão só', async () => {
+      const login = await http().post('/auth/login').send(ana).expect(200);
+      const antigo = { refresh_token: login.body.refresh_token };
+
+      // A resposta da primeira troca "se perdeu": o aparelho repete com o token antigo.
+      const primeira = await http().post('/auth/refresh').send(antigo).expect(200);
+      const repetida = await http().post('/auth/refresh').send(antigo).expect(200);
+
+      // O sucessor que não chegou ao aparelho deixou de valer; só a última troca vale.
+      await http()
+        .post('/auth/refresh')
+        .send({ refresh_token: primeira.body.refresh_token })
+        .expect(401);
+      const seguinte = await http()
+        .post('/auth/refresh')
+        .send({ refresh_token: repetida.body.refresh_token })
+        .expect(200);
+
+      // O sucessor já foi usado: repetir o token antigo agora é recusado.
+      await http().post('/auth/refresh').send(antigo).expect(401);
+      await http()
+        .post('/auth/refresh')
+        .send({ refresh_token: seguinte.body.refresh_token })
+        .expect(200);
+    });
+
+    it('duas trocas simultâneas do mesmo token não abrem duas cadeias', async () => {
+      const login = await http().post('/auth/login').send(ana).expect(200);
+      const antigo = { refresh_token: login.body.refresh_token };
+
+      const respostas = await Promise.all([
+        http().post('/auth/refresh').send(antigo),
+        http().post('/auth/refresh').send(antigo),
+      ]);
+      const novos = respostas.filter((r) => r.status === 200).map((r) => r.body.refresh_token);
+      expect(novos.length).toBeGreaterThanOrEqual(1);
+
+      // Dos tokens emitidos, só um continua valendo.
+      const validos = [];
+      for (const token of novos) {
+        const r = await http().post('/auth/refresh').send({ refresh_token: token });
+        if (r.status === 200) validos.push(token);
+      }
+      expect(validos).toHaveLength(1);
+    });
+
+    it('token trocado reapresentado fora da tolerância derruba todas as sessões do usuário', async () => {
+      const login = await http().post('/auth/login').send(ana).expect(200);
+      const outroAparelho = await http().post('/auth/login').send(ana).expect(200);
+      await http().post('/auth/refresh').send({ refresh_token: login.body.refresh_token }).expect(200);
+
+      // Envelhece a troca além da tolerância de 2 minutos.
+      await dataSource
+        .getRepository(RefreshToken)
+        .createQueryBuilder()
+        .update(RefreshToken)
+        .set({ replaced_at: new Date(Date.now() - 10 * 60_000) })
+        .where('replaced_at IS NOT NULL')
+        .execute();
+
+      await http().post('/auth/refresh').send({ refresh_token: login.body.refresh_token }).expect(401);
+      await http()
+        .post('/auth/refresh')
+        .send({ refresh_token: outroAparelho.body.refresh_token })
+        .expect(401);
     });
 
     it('depois do logout o refresh token não vale mais', async () => {

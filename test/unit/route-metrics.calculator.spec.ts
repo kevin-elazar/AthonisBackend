@@ -2,7 +2,9 @@ import {
   computeRouteMetrics,
   haversineMeters,
   idleTimeMs,
+  longestIncreasingSubsequenceLength,
   MetricsInput,
+  pingsWithinExecution,
   MetricsPingInput,
   traveledDistanceMeters,
 } from '@/modules/analytics/route-metrics.calculator';
@@ -179,8 +181,46 @@ describe('route-metrics.calculator', () => {
         }),
       );
 
-      expect(result.stops_out_of_order).toBe(2);
+      // Uma troca: basta a parada 1 mudar de lugar para a execução seguir o plano.
+      expect(result.stops_out_of_order).toBe(1);
       expect(result.stops.map((s) => s.actual_sequence)).toEqual([2, 1, 3]);
+    });
+
+    it('conta só quem saiu do lugar: planejado 1..5, executado 2,3,4,5,1 dá 1', () => {
+      const cinco = [1, 2, 3, 4, 5].map((n) => ({
+        order_id: n,
+        status: 'delivered',
+        planned_sequence: n,
+        planned_arrival: null,
+      }));
+      const ordem = [2, 3, 4, 5, 1];
+
+      const result = computeRouteMetrics(
+        base({
+          stops: cinco,
+          events: ordem.flatMap((orderId, i) => visita(orderId, 10 + i * 10, 15 + i * 10)),
+        }),
+      );
+
+      expect(result.stops_out_of_order).toBe(1);
+      expect(result.stops.map((s) => s.actual_sequence)).toEqual([5, 1, 2, 3, 4]);
+    });
+
+    it('ordem invertida conta todas menos uma', () => {
+      const quatro = [1, 2, 3, 4].map((n) => ({
+        order_id: n,
+        status: 'delivered',
+        planned_sequence: n,
+        planned_arrival: null,
+      }));
+      const result = computeRouteMetrics(
+        base({
+          stops: quatro,
+          events: [4, 3, 2, 1].flatMap((orderId, i) => visita(orderId, 10 + i * 10, 15 + i * 10)),
+        }),
+      );
+
+      expect(result.stops_out_of_order).toBe(3);
     });
 
     it('uma parada pulada não torna as seguintes fora de ordem', () => {
@@ -233,6 +273,50 @@ describe('route-metrics.calculator', () => {
       expect(result.planned_distance_m).toBe(10000);
       expect(Math.abs(result.actual_distance_m! - 12000) / 12000).toBeLessThan(0.02);
       expect(result.ping_count).toBe(41);
+    });
+
+    it('usa só o rastro entre a saída e o encerramento', () => {
+      // Antes de iniciar (indo ao depósito) e depois de encerrar (voltando para casa).
+      const antes = Array.from({ length: 10 }, (_, i) => ponto(-10 + i * 0.5, -5000 + i * 300));
+      const durante = Array.from({ length: 21 }, (_, i) => ponto(i * 0.5, i * 250));
+      const depois = Array.from({ length: 10 }, (_, i) => ponto(91 + i * 0.5, 20000 + i * 300));
+
+      const result = computeRouteMetrics(
+        base({ started_at: em(0), finished_at: em(90), pings: [...antes, ...durante, ...depois] }),
+      );
+
+      expect(result.ping_count).toBe(21);
+      expect(Math.abs(result.actual_distance_m! - 5000) / 5000).toBeLessThan(0.02);
+    });
+  });
+
+  describe('pingsWithinExecution', () => {
+    const pings = [ponto(-1, 0), ponto(0, 10), ponto(45, 20), ponto(90, 30), ponto(91, 40)];
+
+    it('mantém os pontos dentro do intervalo, com as pontas', () => {
+      expect(pingsWithinExecution(pings, em(0), em(90))).toHaveLength(3);
+    });
+
+    it('sem saída ou sem encerramento, não corta nada', () => {
+      expect(pingsWithinExecution(pings, null, em(90))).toHaveLength(5);
+      expect(pingsWithinExecution(pings, em(0), null)).toHaveLength(5);
+    });
+
+    it('intervalo invertido (relógio errado) não apaga o rastro', () => {
+      expect(pingsWithinExecution(pings, em(90), em(0))).toHaveLength(5);
+    });
+  });
+
+  describe('longestIncreasingSubsequenceLength', () => {
+    it.each([
+      [[], 0],
+      [[1, 2, 3, 4, 5], 5],
+      [[2, 3, 4, 5, 1], 4],
+      [[5, 4, 3, 2, 1], 1],
+      [[3, 1, 2, 5, 4], 3],
+      [[1, 1, 1], 1],
+    ])('%j → %i', (values, esperado) => {
+      expect(longestIncreasingSubsequenceLength(values as number[])).toBe(esperado);
     });
   });
 });

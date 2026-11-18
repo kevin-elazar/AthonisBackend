@@ -10,6 +10,10 @@ import { seedDriver, seedRoute } from './seed/driver-route.seed';
 import { Order } from '../src/shared/entities/order.entity';
 import { Route } from '../src/shared/entities/route.entity';
 import { Driver } from '../src/shared/entities/driver.entity';
+import { UpdateQueryBuilder } from 'typeorm';
+import { RouteLocationPing } from '../src/shared/entities/route-location-ping.entity';
+import { RouteMetricsService } from '../src/modules/analytics/route-metrics.service';
+import { RouteExecutionMetrics } from '../src/shared/entities/route-execution-metrics.entity';
 
 /**
  * Um dia de rota, do começo ao fim, do jeito que o aplicativo faz — inclusive
@@ -150,6 +154,75 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       `${base}/stops/${orders[0].order_id}/fail`,
       evento(6, { occurrence_type: 'refused' }),
     ).expect(409);
+  });
+
+  describe('baixa atômica da parada', () => {
+    const eventosDaParada = (orderId: number) =>
+      rawQuery(
+        dataSource,
+        "SELECT type FROM route_event WHERE order_id = ? AND type IN ('delivered', 'failed')",
+        [orderId],
+      );
+
+    it('reenvio depois de uma falha no meio grava tudo, uma vez só', async () => {
+      const { orders, base } = await novaRota(1);
+      const orderId = orders[0].order_id;
+      await post(`${base}/start`, evento(0)).expect(200);
+      const body = evento(10, { notes: 'Recebido' });
+
+      // O banco cai na hora de baixar o pedido, depois do evento gravado.
+      const falha = jest
+        .spyOn(UpdateQueryBuilder.prototype, 'execute')
+        .mockRejectedValueOnce(new Error('conexão perdida'));
+      await post(`${base}/stops/${orderId}/deliver`, body).expect(500);
+      falha.mockRestore();
+
+      // Nada ficou pela metade: nem evento, nem pedido baixado.
+      expect(await eventosDaParada(orderId)).toEqual([]);
+      const aberto = await dataSource.getRepository(Order).findOneBy({ order_id: orderId });
+      expect(aberto!.status).not.toBe('delivered');
+
+      // O aparelho reenvia o mesmo evento e a baixa entra.
+      const res = await post(`${base}/stops/${orderId}/deliver`, body).expect(200);
+      expect(res.body.stops[0]).toMatchObject({ status: 'delivered', completed_at: em(10) });
+      expect(await eventosDaParada(orderId)).toEqual([{ type: 'delivered' }]);
+
+      // E um terceiro envio continua sendo só um "já recebido".
+      await post(`${base}/stops/${orderId}/deliver`, body).expect(200);
+      expect(await eventosDaParada(orderId)).toHaveLength(1);
+    });
+
+    it('entrega e ocorrência ao mesmo tempo: uma vale, a outra recebe 409', async () => {
+      const { orders, base } = await novaRota(1);
+      const orderId = orders[0].order_id;
+      await post(`${base}/start`, evento(0)).expect(200);
+
+      const respostas = await Promise.all([
+        post(`${base}/stops/${orderId}/deliver`, evento(10)),
+        post(`${base}/stops/${orderId}/fail`, evento(10, { occurrence_type: 'refused' })),
+      ]);
+
+      expect(respostas.map((r) => r.status).sort()).toEqual([200, 409]);
+      const eventos = await eventosDaParada(orderId);
+      expect(eventos).toHaveLength(1);
+      const pedido = await dataSource.getRepository(Order).findOneBy({ order_id: orderId });
+      expect(pedido!.status).toBe(eventos[0].type);
+    });
+
+    it('o mesmo evento chegando duas vezes ao mesmo tempo responde 200 nas duas', async () => {
+      const { orders, base } = await novaRota(1);
+      const orderId = orders[0].order_id;
+      await post(`${base}/start`, evento(0)).expect(200);
+      const body = evento(10);
+
+      const respostas = await Promise.all([
+        post(`${base}/stops/${orderId}/deliver`, body),
+        post(`${base}/stops/${orderId}/deliver`, body),
+      ]);
+
+      expect(respostas.map((r) => r.status)).toEqual([200, 200]);
+      expect(await eventosDaParada(orderId)).toHaveLength(1);
+    });
   });
 
   it('recusa parada que pertence a outra rota', async () => {
@@ -301,6 +374,16 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       expect(new Date(rota!.finished_at!).toISOString()).toBe(em(45));
     });
 
+    it('recusa evento com hora anterior à data da rota', async () => {
+      const { base } = await novaRota(1);
+
+      const res = await post(`${base}/start`, {
+        client_event_id: randomUUID(),
+        occurred_at: new Date(Date.now() - 5 * 24 * 60 * 60_000).toISOString(),
+      }).expect(400);
+      expect(res.body.message).toContain('anterior à data da rota');
+    });
+
     it('hora do aparelho no futuro é trocada pela hora do servidor', async () => {
       const { route, base } = await novaRota(1);
       const antes = Date.now();
@@ -334,7 +417,7 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       await post(`${base}/start`, evento(0)).expect(200);
       const points = rastro(120);
 
-      await post(`${base}/locations`, { points }).expect(200).expect({ accepted: 120 });
+      await post(`${base}/locations`, { points }).expect(200).expect({ accepted: 120, rejected: 0 });
       await post(`${base}/locations`, { points }).expect(200);
 
       const total = await rawQuery(dataSource, 
@@ -342,6 +425,31 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
         [route.route_id],
       );
       expect(Number(total[0].total)).toBe(120);
+    });
+
+    it('descarta, um a um, pontos do futuro ou de antes da rota', async () => {
+      const { route, base } = await novaRota(1);
+      await post(`${base}/start`, evento(0)).expect(200);
+      const agora = Date.now();
+      const futuro = Array.from({ length: 3 }, (_, i) => ({
+        ...rastro(1)[0],
+        recorded_at: new Date(agora + (60 + i) * 60_000).toISOString(),
+      }));
+      const passado = { ...rastro(1)[0], recorded_at: new Date(agora - 5 * 24 * 60 * 60_000).toISOString() };
+      const validos = rastro(4);
+
+      await post(`${base}/locations`, { points: [...validos, ...futuro, passado] })
+        .expect(200)
+        .expect({ accepted: 4, rejected: 4 });
+
+      // Nenhum ponto do futuro foi "achatado" para a hora do servidor.
+      const gravados = await dataSource
+        .getRepository(RouteLocationPing)
+        .findBy({ route_id: route.route_id });
+      expect(gravados).toHaveLength(4);
+      for (const ponto of gravados) {
+        expect(new Date(ponto.recorded_at).getTime()).toBeLessThan(agora);
+      }
     });
 
     it('recusa lote acima do limite e rota ainda não iniciada', async () => {
@@ -374,6 +482,49 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       );
       expect(comRastro[0].ping_count).toBe(26);
       expect(Math.abs(comRastro[0].actual_distance_m - 5560) / 5560).toBeLessThan(0.02);
+    });
+  });
+
+  describe('consolidação', () => {
+    it('consolidações simultâneas da mesma rota gravam uma linha só', async () => {
+      const { route, orders, base } = await novaRota(1);
+      await post(`${base}/start`, evento(0)).expect(200);
+      await post(`${base}/stops/${orders[0].order_id}/deliver`, evento(10)).expect(200);
+      await post(`${base}/finish`, evento(20)).expect(200);
+
+      const servico = app.get(RouteMetricsService);
+      const resultados = await Promise.all([
+        servico.consolidate(route.route_id, route.id_company),
+        servico.consolidate(route.route_id, route.id_company),
+        servico.consolidate(route.route_id, route.id_company),
+      ]);
+
+      expect(resultados.every((r) => r?.route_id === route.route_id)).toBe(true);
+      const linhas = await rawQuery(
+        dataSource,
+        'SELECT COUNT(*) AS total FROM route_execution_metrics WHERE route_id = ?',
+        [route.route_id],
+      );
+      expect(Number(linhas[0].total)).toBe(1);
+    });
+
+    it('abrir a comparação de rota encerrada não regrava a consolidação', async () => {
+      const { route, orders, base } = await novaRota(1);
+      await post(`${base}/start`, evento(0)).expect(200);
+      await post(`${base}/stops/${orders[0].order_id}/deliver`, evento(10)).expect(200);
+      await post(`${base}/finish`, evento(20)).expect(200);
+
+      const repo = dataSource.getRepository(RouteExecutionMetrics);
+      const antes = await repo.findOneByOrFail({ route_id: route.route_id });
+
+      await http()
+        .get(`/analytics/routes/${route.route_id}/comparison`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const depois = await repo.findOneByOrFail({ route_id: route.route_id });
+      expect(depois.id).toBe(antes.id);
+      expect(new Date(depois.computed_at).getTime()).toBe(new Date(antes.computed_at).getTime());
     });
   });
 

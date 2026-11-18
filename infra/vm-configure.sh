@@ -24,12 +24,28 @@ else
   echo ".env já existia; só o domínio foi atualizado"
 fi
 
+# Token do /metrics, igual nas duas APIs e no Prometheus. Só é gerado numa
+# instalação nova (sem o arquivo); num servidor que já existe, nada muda.
+mkdir -p secrets
+if [ -d secrets/metrics_token ]; then rmdir secrets/metrics_token; fi
+if [ ! -f secrets/metrics_token ]; then
+  METRICS_TOKEN="$(aleatorio 48 48)"
+  printf '%s\n' "$METRICS_TOKEN" > secrets/metrics_token
+  echo "secrets/metrics_token criado"
+else
+  METRICS_TOKEN=""
+fi
+# O Prometheus roda como nobody (65534) e precisa ler o arquivo.
+chown 65534:65534 secrets/metrics_token
+chmod 600 secrets/metrics_token
+
 for ambiente in production staging; do
   arquivo="env/api.${ambiente}.env"
   prefixo=""; [ "$ambiente" = staging ] && prefixo="staging-"
   if [ ! -f "$arquivo" ]; then
     sed -e "s|^JWT_SECRET=.*|JWT_SECRET=$(aleatorio 64 64)|" \
         -e "s|^CORS_ORIGIN=.*|CORS_ORIGIN=https://${prefixo}app.${BASE_DOMAIN}|" \
+        -e "s|^METRICS_TOKEN=.*|METRICS_TOKEN=${METRICS_TOKEN}|" \
         "env/api.${ambiente}.env.example" > "$arquivo"
     chmod 600 "$arquivo"
     echo "$arquivo criado"

@@ -23,6 +23,18 @@ import {
   FailStopDto,
 } from '../dto/driver-event.dto';
 import { LocationBatchDto } from '../dto/location-batch.dto';
+import { Throttle } from '@nestjs/throttler';
+
+/**
+ * Limite mais folgado para o rastro de GPS: ao voltar a ter sinal o aplicativo
+ * descarrega o rastro acumulado em vários lotes seguidos, e vários motoristas
+ * podem sair pelo mesmo IP (NAT da operadora). Os nomes batem com app.module.ts.
+ */
+const LOCATIONS_THROTTLE = {
+  short: { ttl: 1000, limit: 30 },
+  medium: { ttl: 10000, limit: 150 },
+  long: { ttl: 60000, limit: 600 },
+};
 
 /**
  * API do aplicativo do entregador.
@@ -134,6 +146,7 @@ export class DriverAppController {
 
   @Post('routes/:id/locations')
   @HttpCode(HttpStatus.OK)
+  @Throttle(LOCATIONS_THROTTLE)
   @ApiOperation({
     summary: 'Envia um lote do rastro de GPS',
     description: 'Até 200 pontos por chamada. Pontos repetidos são ignorados.',

@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import { runInTransaction } from '../../../database/transaction';
 import { Route } from '../../../shared/entities/route.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
@@ -406,7 +408,7 @@ export class RoutesService {
     const mesmasParadas = baixadasNaOriginal === 0 && disponiveis.length === devolvidas;
     const autor = this.autor();
 
-    const novaRotaId = await this.dataSource.transaction(async (manager) => {
+    const novaRotaId = await runInTransaction(this.dataSource, async (manager) => {
       const nova = await manager.save(
         manager.create(Route, {
           id_company: idCompany,
@@ -423,11 +425,15 @@ export class RoutesService {
         }),
       );
 
+      // Cada pedido só é tomado se ainda estiver livre na fila. Entre a
+      // consulta acima e este ponto outra rota (ou outra duplicação) pode ter
+      // levado algum; nesse caso nada é gravado e a resposta é 409.
+      let tomados = 0;
       for (const [indice, stop] of disponiveis.entries()) {
-        await manager.update(
-          Order,
-          { order_id: stop.order_id, id_company: idCompany },
-          {
+        const result = await manager
+          .createQueryBuilder()
+          .update(Order)
+          .set({
             route_id: nova.route_id,
             stop_sequence: indice + 1,
             status: 'planned',
@@ -435,7 +441,17 @@ export class RoutesService {
             vehicle_id: vehicleId,
             delivery_date: plannedDate as unknown as Date,
             updated_by: autor,
-          },
+          })
+          .where('order_id = :orderId', { orderId: stop.order_id })
+          .andWhere('id_company = :idCompany', { idCompany })
+          .andWhere('route_id IS NULL')
+          .andWhere('status = :pending', { pending: 'pending' })
+          .execute();
+        tomados += result.affected ?? 0;
+      }
+      if (tomados < disponiveis.length) {
+        throw new ConflictException(
+          'Algumas paradas desta rota foram colocadas em outra rota enquanto a duplicação acontecia. Tente de novo.',
         );
       }
 

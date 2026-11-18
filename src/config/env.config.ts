@@ -25,8 +25,30 @@ function optionalEnv(name: string): string | undefined {
   return value && value.trim() !== '' ? value : undefined;
 }
 
+/**
+ * Valor do `trust proxy` do Express. Atrás do Traefik/Caddy, sem ele o req.ip
+ * é o endereço do proxy e todos os usuários caem no mesmo balde do throttler.
+ *
+ * TRUST_PROXY aceita: número de saltos (`1`), `true`/`false` ou uma lista de
+ * sub-redes/palavras do Express (`loopback`, `10.0.0.0/8`...). Sem a variável,
+ * vale 1 em produção (um proxy na frente) e false fora dela.
+ */
+export function parseTrustProxy(
+  raw: string | undefined,
+  production: boolean,
+): boolean | number | string {
+  const value = raw?.trim();
+  if (!value) return production ? 1 : false;
+  const lower = value.toLowerCase();
+  if (lower === 'false' || lower === 'off' || lower === 'no') return false;
+  if (lower === 'true' || lower === 'on' || lower === 'yes') return true;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
+
 export const config = {
   isProduction,
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY, isProduction),
   database: {
     type: process.env.DB_TYPE || 'postgres',
   },

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -34,6 +35,7 @@ import {
 } from '../dto/driver-event.dto';
 import { LocationBatchDto } from '../dto/location-batch.dto';
 import { RouteMetricsService } from '../../analytics/route-metrics.service';
+import { runInTransaction } from '../../../database/transaction';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -42,6 +44,12 @@ const PING_INSERT_CHUNK = 50;
 
 /** Relógio do aparelho adiantado além disto é tratado como erro e trocado pela hora do servidor. */
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * Folga antes do início possível da rota (criação ou dia planejado, o que vier
+ * primeiro). Um evento mais antigo que isto só sai de um relógio errado.
+ */
+const MAX_PAST_SLACK_MS = 24 * 60 * 60 * 1000;
 
 /** Uma parada, do jeito que o aplicativo mostra. */
 export interface DriverStopView {
@@ -195,7 +203,7 @@ export class DriverRoutesService {
     }
 
     const route = await this.findOwnRoute(routeId);
-    const occurredAt = this.occurredAt(dto);
+    const occurredAt = this.occurredAt(dto, route);
 
     if (route.status === 'planned') {
       await this.routesService.start(routeId);
@@ -222,7 +230,7 @@ export class DriverRoutesService {
     const route = await this.findOwnRoute(routeId);
     await this.findOpenStop(route, orderId);
 
-    await this.recordEvent(route, 'arrived', dto, this.occurredAt(dto), { order_id: orderId });
+    await this.recordEvent(route, 'arrived', dto, this.occurredAt(dto, route), { order_id: orderId });
     return this.findOne(routeId);
   }
 
@@ -250,7 +258,7 @@ export class DriverRoutesService {
     }
 
     const route = await this.findOwnRoute(routeId);
-    const occurredAt = this.occurredAt(dto);
+    const occurredAt = this.occurredAt(dto, route);
 
     if (route.status === 'active') {
       const orders = await this.orderRepository.find({
@@ -313,7 +321,7 @@ export class DriverRoutesService {
     }
 
     const route = await this.findOwnRoute(routeId);
-    const occurredAt = this.occurredAt(dto);
+    const occurredAt = this.occurredAt(dto, route);
 
     if (route.status === 'active') {
       await this.routesService.cancel(routeId);
@@ -335,24 +343,51 @@ export class DriverRoutesService {
    * Aceita pontos de uma rota já encerrada: com a fila offline, é normal o
    * rastro chegar depois do encerramento. Nesse caso a comparação é refeita.
    */
-  async recordLocations(routeId: number, dto: LocationBatchDto): Promise<{ accepted: number }> {
+  async recordLocations(
+    routeId: number,
+    dto: LocationBatchDto,
+  ): Promise<{ accepted: number; rejected: number }> {
     const route = await this.findOwnRoute(routeId);
 
     if (route.status === 'planned' || route.status === 'cancelled') {
       throw new ConflictException(`Esta rota está como "${route.status}" e não recebe rastreamento`);
     }
 
-    const rows = dto.points.map((point) => ({
-      id_company: route.id_company,
-      route_id: route.route_id,
-      latitude: point.latitude,
-      longitude: point.longitude,
-      accuracy_m: point.accuracy_m,
-      // Alguns aparelhos informam -1 quando não sabem a velocidade.
-      speed_mps: point.speed_mps != null && point.speed_mps >= 0 ? point.speed_mps : undefined,
-      recorded_at: this.occurredAt({ occurred_at: point.recorded_at }),
-      client_ping_id: point.client_ping_id,
-    }));
+    // Cada ponto é julgado sozinho. Trocar a hora de um ponto do futuro pela
+    // do servidor faria um lote inteiro de relógio adiantado cair no mesmo
+    // instante, e o rastro viraria uma sequência de saltos "instantâneos".
+    // Ponto fora do intervalo possível da rota é descartado.
+    const agora = Date.now();
+    const piso = this.earliestEventTime(route);
+    const rows: Array<Partial<RouteLocationPing>> = [];
+    for (const point of dto.points) {
+      const recordedAt = new Date(point.recorded_at);
+      const instante = recordedAt.getTime();
+      if (
+        Number.isNaN(instante) ||
+        instante > agora + MAX_CLOCK_SKEW_MS ||
+        (piso !== null && instante < piso)
+      ) {
+        continue;
+      }
+      rows.push({
+        id_company: route.id_company,
+        route_id: route.route_id,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        accuracy_m: point.accuracy_m,
+        // Alguns aparelhos informam -1 quando não sabem a velocidade.
+        speed_mps: point.speed_mps != null && point.speed_mps >= 0 ? point.speed_mps : undefined,
+        recorded_at: recordedAt,
+        client_ping_id: point.client_ping_id,
+      });
+    }
+    const rejected = dto.points.length - rows.length;
+    if (rejected > 0) {
+      this.logger.warn(
+        `Rota ${route.route_id}: ${rejected} ponto(s) de GPS descartado(s) por hora fora do intervalo da rota`,
+      );
+    }
 
     for (let inicio = 0; inicio < rows.length; inicio += PING_INSERT_CHUNK) {
       await this.pingRepository
@@ -365,11 +400,11 @@ export class DriverRoutesService {
         .execute();
     }
 
-    if (route.status === 'completed') {
+    if (route.status === 'completed' && rows.length > 0) {
       await this.consolidate(route);
     }
 
-    return { accepted: rows.length };
+    return { accepted: rows.length, rejected };
   }
 
   private async closeStop(
@@ -385,19 +420,51 @@ export class DriverRoutesService {
 
     const route = await this.findOwnRoute(routeId);
     await this.findOpenStop(route, orderId);
-    const occurredAt = this.occurredAt(dto);
+    const occurredAt = this.occurredAt(dto, route);
 
-    await this.orderRepository.update(
-      { order_id: orderId, id_company: route.id_company },
-      {
-        status,
-        // A hora de entrega só faz sentido para o que foi entregue.
-        delivered_at: status === 'delivered' ? occurredAt : undefined,
-        updated_by: this.tenantContext.getUser()?.email ?? undefined,
-      },
-    );
+    // Evento e baixa do pedido numa transação só. O evento entra primeiro: o
+    // índice único (id_company, client_event_id) decide qual de dois envios
+    // iguais vale. A baixa só pega um pedido ainda aberto desta rota; se outro
+    // evento chegou antes (entrega e ocorrência ao mesmo tempo), nada muda, a
+    // transação volta e a resposta é 409. Assim um reenvio depois de uma falha
+    // no meio do caminho encontra tudo como estava antes.
+    try {
+      await runInTransaction(this.dataSource, async (manager) => {
+        await manager.insert(
+          RouteEvent,
+          this.buildEvent(route, status, dto, occurredAt, { order_id: orderId, ...extra }),
+        );
 
-    await this.recordEvent(route, status, dto, occurredAt, { order_id: orderId, ...extra });
+        const result = await manager
+          .createQueryBuilder()
+          .update(Order)
+          .set({
+            status,
+            // A hora de entrega só faz sentido para o que foi entregue.
+            ...(status === 'delivered' ? { delivered_at: occurredAt } : {}),
+            updated_by: this.tenantContext.getUser()?.email ?? undefined,
+          })
+          .where('order_id = :orderId', { orderId })
+          .andWhere('route_id = :routeId', { routeId: route.route_id })
+          .andWhere('id_company = :idCompany', { idCompany: route.id_company })
+          .andWhere('status NOT IN (:...finais)', { finais: [...FINAL_STOP_STATUSES] })
+          .execute();
+
+        if (!result.affected) {
+          throw new ConflictException('Esta parada já foi encerrada');
+        }
+      });
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      // O mesmo evento chegou duas vezes ao mesmo tempo e o outro envio gravou
+      // primeiro (violação do índice único): o fato já está registrado.
+      if (await this.alreadyProcessed(dto.client_event_id)) {
+        this.logger.warn(`Evento ${dto.client_event_id} recebido em duplicidade`);
+        return this.findOne(routeId);
+      }
+      throw error;
+    }
+
     return this.findOne(routeId);
   }
 
@@ -464,13 +531,67 @@ export class DriverRoutesService {
     return !!existing;
   }
 
-  protected occurredAt(dto: { occurred_at: string }): Date {
+  /**
+   * Hora do evento informada pelo aparelho.
+   *
+   * Relógio adiantado além de MAX_CLOCK_SKEW_MS vira a hora do servidor (é um
+   * evento por chamada, então não há lote para "achatar"). Hora anterior ao
+   * início possível da rota é recusada: gravá-la distorceria a duração e a
+   * pontualidade calculadas no painel.
+   */
+  protected occurredAt(dto: { occurred_at: string }, route?: Route): Date {
     const informado = new Date(dto.occurred_at);
     const agora = Date.now();
     if (Number.isNaN(informado.getTime()) || informado.getTime() > agora + MAX_CLOCK_SKEW_MS) {
       return new Date(agora);
     }
+    const piso = this.earliestEventTime(route);
+    if (piso !== null && informado.getTime() < piso) {
+      throw new BadRequestException(
+        'A hora do evento é anterior à data da rota. Confira o relógio do aparelho.',
+      );
+    }
     return informado;
+  }
+
+  /**
+   * Instante mais antigo aceito para um fato da rota: a criação ou o dia
+   * planejado (o que vier primeiro), menos MAX_PAST_SLACK_MS. Null sem
+   * referência.
+   */
+  protected earliestEventTime(route?: Route): number | null {
+    if (!route) return null;
+    const candidatos: number[] = [];
+    const criada = route.created_at ? new Date(route.created_at).getTime() : NaN;
+    if (!Number.isNaN(criada)) candidatos.push(criada);
+    if (route.planned_date) {
+      // Meia-noite UTC do dia planejado; com a folga de um dia cobre qualquer fuso do país.
+      const dia = new Date(`${String(route.planned_date).slice(0, 10)}T00:00:00Z`).getTime();
+      if (!Number.isNaN(dia)) candidatos.push(dia);
+    }
+    if (candidatos.length === 0) return null;
+    return Math.min(...candidatos) - MAX_PAST_SLACK_MS;
+  }
+
+  private buildEvent(
+    route: Route,
+    type: RouteEventType,
+    dto: DriverEventDto,
+    occurredAt: Date,
+    extra: Partial<RouteEvent> = {},
+  ): RouteEvent {
+    return this.eventRepository.create({
+      id_company: route.id_company,
+      route_id: route.route_id,
+      driver_id: route.driver_id ?? undefined,
+      type,
+      latitude: dto.latitude,
+      longitude: dto.longitude,
+      accuracy_m: dto.accuracy_m,
+      occurred_at: occurredAt,
+      client_event_id: dto.client_event_id,
+      ...extra,
+    });
   }
 
   protected async recordEvent(
@@ -481,20 +602,7 @@ export class DriverRoutesService {
     extra: Partial<RouteEvent> = {},
   ): Promise<void> {
     try {
-      await this.eventRepository.save(
-        this.eventRepository.create({
-          id_company: route.id_company,
-          route_id: route.route_id,
-          driver_id: route.driver_id ?? undefined,
-          type,
-          latitude: dto.latitude,
-          longitude: dto.longitude,
-          accuracy_m: dto.accuracy_m,
-          occurred_at: occurredAt,
-          client_event_id: dto.client_event_id,
-          ...extra,
-        }),
-      );
+      await this.eventRepository.save(this.buildEvent(route, type, dto, occurredAt, extra));
     } catch (error) {
       // Duas cópias do mesmo envio chegando juntas: a segunda bate no índice
       // único. O fato já está gravado, então não há o que reportar.

@@ -19,7 +19,8 @@
 (api) {
 	import seguranca
 	# /metrics só é lido pelo Prometheus, pela rede interna do Docker.
-	@metrics path /metrics /metrics/*
+	# Sem diferenciar maiúsculas: o Express também atende /METRICS.
+	@metrics path_regexp metrics (?i)^/metrics
 	respond @metrics 404
 }
 

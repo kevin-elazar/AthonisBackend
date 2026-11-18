@@ -18,6 +18,10 @@ async function bootstrap() {
       : ['error', 'warn', 'debug', 'log', 'verbose'],
   });
 
+  // Atrás do proxy reverso o IP do cliente vem em X-Forwarded-For; sem isto o
+  // throttler enxerga só o IP do proxy e todos os usuários dividem o limite.
+  app.getHttpAdapter().getInstance().set('trust proxy', config.trustProxy);
+
   app.use(
     helmet({
       contentSecurityPolicy: false,

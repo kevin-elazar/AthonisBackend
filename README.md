@@ -24,7 +24,7 @@ API e infraestrutura do **Athonis**, sistema de roteirização e acompanhamento 
 | `observability` | `/health`, `/metrics` | Saúde (banco) e métricas Prometheus (só na rede interna) |
 | `street-view` | `/street-view/*` | Imagem da fachada do endereço (cache) |
 
-A comparação planejado × executado é calculada uma vez, no encerramento da rota (`src/modules/analytics/route-metrics.calculator.ts`), e gravada em `route_execution_metrics`: distância por haversine descartando leituras imprecisas, duração, paradas fora de ordem, atraso, tempo de atendimento e tempo ocioso.
+A comparação planejado × executado é calculada uma vez, no encerramento da rota (`src/modules/analytics/route-metrics.calculator.ts`), e gravada em `route_execution_metrics`: distância por haversine descartando leituras imprecisas e o rastro fora do intervalo entre a saída e o encerramento, duração, paradas fora de ordem (visitadas menos a maior subsequência crescente da ordem planejada, de modo que fazer só a primeira parada por último conta 1), atraso, tempo de atendimento e tempo ocioso.
 
 ## Stack
 

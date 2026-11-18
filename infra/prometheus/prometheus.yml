@@ -6,6 +6,12 @@ global:
 scrape_configs:
   - job_name: athonis-api
     metrics_path: /metrics
+    # Token de METRICS_TOKEN (env/api.*.env), lido de infra/secrets/metrics_token.
+    # Se a API não tiver METRICS_TOKEN, o cabeçalho é ignorado; o arquivo só
+    # precisa existir (deploy.sh e vm-configure.sh garantem isso).
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics_token
     static_configs:
       - targets: ["api:8080"]
         labels: { ambiente: production }
