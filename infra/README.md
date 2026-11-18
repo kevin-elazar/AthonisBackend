@@ -128,6 +128,33 @@ backend e baixa as imagens sem credencial).
    `/opt/athonis/infra/secrets/google-service-account.json` (`chmod 600`) e
    rode `cd /opt/athonis/infra && docker compose up -d api api-staging`.
 
+## Rotas reais do Google (sair do modo simulado)
+
+Sem credenciais, a API gera rotas **simuladas**: as paradas seguem a ordem dos
+pedidos, a coordenada é estimada em torno do centro da cidade e a distância é
+5 km por parada. Para a otimização real são preciso duas coisas do Google
+Cloud, no mesmo projeto:
+
+1. **Projeto e faturamento:** em console.cloud.google.com, crie um projeto
+   (ex.: `athonis-rotas`) e vincule uma conta de faturamento. O uso de
+   demonstração fica dentro da cota gratuita mensal.
+2. **APIs:** em *APIs e serviços → Biblioteca*, ative **Route Optimization
+   API** e **Geocoding API**.
+3. **Chave do Geocoding:** em *Credenciais → Criar credenciais → Chave de API*.
+   Restrinja a chave à Geocoding API e ao IP da VPS (187.53.99.235).
+4. **Conta de serviço da otimização:** em *IAM → Contas de serviço*, crie
+   `athonis-rotas` com o papel **Route Optimization Editor**; em *Chaves →
+   Adicionar chave → JSON*, baixe o arquivo.
+5. **Na VPS** (console web do hPanel, como root):
+   `bash /opt/athonis/infra/google-credentials.sh`. O script pede o JSON
+   (colar e Ctrl+D) e a chave (digitação oculta), grava
+   `secrets/google-service-account.json` legível pelo usuário da API, preenche
+   `GOOGLE_PROJECT_ID` e `GOOGLE_GEOCODING_API_KEY` nas duas APIs e as recria.
+
+Depois disso, uma rota gerada no painel não mostra mais o aviso de modo
+simulado. Pedidos já roteirizados no modo simulado não guardam a coordenada
+estimada como definitiva: ao voltar para a fila, são geocodificados de novo.
+
 ## Operação
 
 No terminal da VPS (hPanel), como root:

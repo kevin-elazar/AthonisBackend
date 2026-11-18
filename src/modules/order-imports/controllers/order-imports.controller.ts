@@ -210,6 +210,21 @@ export class OrderImportsController {
     }
   }
 
+  @Get('template')
+  @ApiOperation({
+    summary: 'Baixar a planilha modelo',
+    description:
+      'CSV com 10 pedidos de demonstração em Jaraguá do Sul, já com motoristas e veículos da empresa (até dois pares, para gerar duas rotas).',
+  })
+  @ApiResponse({ status: 200, description: 'Planilha modelo', content: { 'text/csv': { schema: { type: 'string' } } } })
+  async downloadTemplate(@Response({ passthrough: true }) res: ExpressResponse): Promise<string> {
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="modelo-importacao-pedidos.csv"',
+    });
+    return this.orderImportsService.buildTemplate();
+  }
+
   @Get('download-rejected/:filename')
   @ApiOperation({ 
     summary: 'Baixar arquivo de rejeições',

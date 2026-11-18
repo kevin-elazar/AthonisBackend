@@ -316,6 +316,7 @@ export class OptimizationRoutesService {
           // Guardamos junto o endereço que gerou a coordenada: se o endereço
           // for editado depois, a chave deixa de bater e a coordenada é
           // resolvida de novo em vez de continuar apontando para o lugar antigo.
+          const geocodingReal = this.geocodingService.isConfigured();
           const chave = pedido
             ? this.addressCoordinates.keyFor({
                 street: pedido.delivery_street,
@@ -336,7 +337,9 @@ export class OptimizationRoutesService {
               status: 'planned',
               delivery_latitude: stop.coordinates?.latitude,
               delivery_longitude: stop.coordinates?.longitude,
-              delivery_geocoded_address: chave ?? undefined,
+              // Sem geocoding real a coordenada é estimada: sem a chave, o
+              // pedido é localizado de novo quando o Google for configurado.
+              delivery_geocoded_address: geocodingReal ? (chave ?? undefined) : null,
               updated_by: autor,
             },
           );
