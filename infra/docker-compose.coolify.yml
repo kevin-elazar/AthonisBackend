@@ -19,10 +19,16 @@ x-traefik: &traefik
   traefik.http.middlewares.athonis-seguranca.headers.contentTypeNosniff: "true"
   traefik.http.middlewares.athonis-seguranca.headers.referrerPolicy: strict-origin-when-cross-origin
   traefik.http.middlewares.athonis-comprimir.compress: "true"
+  # Todo container repete estes labels; o Traefik desliga um middleware (e as
+  # rotas que o usam) se dois containers o definirem com valores diferentes.
+  # Por isso um middleware publicado nunca muda de valor: para mudar, crie
+  # outro nome. athonis-sem-metrics é o original (só minúsculas).
+  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.regex: ^/metrics.*
+  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.replacement: /__sem-acesso
   # (?i): o Express casa rotas sem diferenciar maiúsculas, então /METRICS
   # também chegaria ao endpoint se o bloqueio olhasse só para minúsculas.
-  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.regex: "(?i)^/metrics"
-  traefik.http.middlewares.athonis-sem-metrics.replacepathregex.replacement: /__sem-acesso
+  traefik.http.middlewares.athonis-sem-metrics-ci.replacepathregex.regex: "(?i)^/metrics"
+  traefik.http.middlewares.athonis-sem-metrics-ci.replacepathregex.replacement: /__sem-acesso
 
 services:
   api:
@@ -32,7 +38,7 @@ services:
       traefik.http.routers.athonis-api.rule: Host(`api.${BASE_DOMAIN}`)
       traefik.http.routers.athonis-api.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-https}
       traefik.http.routers.athonis-api.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
-      traefik.http.routers.athonis-api.middlewares: athonis-seguranca,athonis-sem-metrics
+      traefik.http.routers.athonis-api.middlewares: athonis-seguranca,athonis-sem-metrics,athonis-sem-metrics-ci
       traefik.http.routers.athonis-api-http.rule: Host(`api.${BASE_DOMAIN}`)
       traefik.http.routers.athonis-api-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
       traefik.http.routers.athonis-api-http.middlewares: athonis-https
@@ -45,7 +51,7 @@ services:
       traefik.http.routers.athonis-api-staging.rule: Host(`staging-api.${BASE_DOMAIN}`)
       traefik.http.routers.athonis-api-staging.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-https}
       traefik.http.routers.athonis-api-staging.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
-      traefik.http.routers.athonis-api-staging.middlewares: athonis-seguranca,athonis-sem-metrics
+      traefik.http.routers.athonis-api-staging.middlewares: athonis-seguranca,athonis-sem-metrics,athonis-sem-metrics-ci
       traefik.http.routers.athonis-api-staging-http.rule: Host(`staging-api.${BASE_DOMAIN}`)
       traefik.http.routers.athonis-api-staging-http.entrypoints: ${TRAEFIK_HTTP_ENTRYPOINT:-http}
       traefik.http.routers.athonis-api-staging-http.middlewares: athonis-https
