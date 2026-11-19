@@ -847,7 +847,7 @@ export function plannedDateFor(
   const datas = pedidos
     .map((pedido) => (pedido.delivery_date ? String(pedido.delivery_date).slice(0, 10) : null))
     .filter((data): data is string => !!data && /^\d{4}-\d{2}-\d{2}$/.test(data))
-    .sort();
+    .sort((a, b) => a.localeCompare(b));
   return datas[0] ?? todayInTimeZone(timezone, agora);
 }
 

@@ -77,8 +77,10 @@ jobs:
     name: SonarCloud
     needs: testes
     runs-on: ubuntu-latest
-    # Fork não recebe o token; sem token o passo é pulado em vez de falhar.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    # Analisa o PR (comparado com a branch de destino) e a branch principal.
+    # O push na branch de trabalho fica de fora: o resultado dele sobrescrevia
+    # o check do PR. Fork não recebe o token; sem token o passo é pulado.
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name != 'pull_request' && github.ref == 'refs/heads/master') }}
     steps:
       - uses: actions/checkout@v4
         with:
