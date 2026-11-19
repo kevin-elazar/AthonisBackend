@@ -3,6 +3,7 @@ import {
   TEMPLATE_COLUMNS,
   buildTemplateCsv,
   normalizeUrgency,
+  pickDriverVehiclePairs,
 } from '@/modules/order-imports/import-template';
 
 /**
@@ -73,5 +74,50 @@ describe('planilha modelo da importação', () => {
   it('urgência vazia continua vazia (a validação acusa)', () => {
     expect(normalizeUrgency(undefined)).toBeUndefined();
     expect(normalizeUrgency('')).toBe('');
+  });
+
+  describe('escolha de motorista e veículo', () => {
+    it('usa o motorista habitual de cada veículo', () => {
+      expect(
+        pickDriverVehiclePairs(
+          [{ driver_id: 1 }, { driver_id: 2 }, { driver_id: 3 }],
+          [
+            { vehicle_id: 10, driver_id: 3 },
+            { vehicle_id: 20, driver_id: 1 },
+          ],
+        ),
+      ).toEqual([
+        { driverId: 3, vehicleId: 10 },
+        { driverId: 1, vehicleId: 20 },
+      ]);
+    });
+
+    it('pula motorista indisponível e veículo em manutenção', () => {
+      expect(
+        pickDriverVehiclePairs(
+          [
+            { driver_id: 1, status: 'unavailable' },
+            { driver_id: 2, status: 'available' },
+          ],
+          [
+            { vehicle_id: 10, status: 'maintenance', driver_id: 2 },
+            { vehicle_id: 20, status: 'available', driver_id: 1 },
+          ],
+        ),
+      ).toEqual([{ driverId: 2, vehicleId: 20 }]);
+    });
+
+    it('sem ninguém disponível, usa o que houver; sem cadastro, nenhum par', () => {
+      expect(
+        pickDriverVehiclePairs([{ driver_id: 5, status: 'unavailable' }], [{ vehicle_id: 9 }]),
+      ).toEqual([{ driverId: 5, vehicleId: 9 }]);
+      expect(pickDriverVehiclePairs([], [{ vehicle_id: 9 }])).toEqual([]);
+    });
+
+    it('no máximo dois pares', () => {
+      const drivers = [1, 2, 3].map((id) => ({ driver_id: id }));
+      const vehicles = [10, 20, 30].map((id) => ({ vehicle_id: id }));
+      expect(pickDriverVehiclePairs(drivers, vehicles)).toHaveLength(2);
+    });
   });
 });

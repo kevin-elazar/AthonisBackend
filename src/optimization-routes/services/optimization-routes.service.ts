@@ -553,7 +553,7 @@ export class OptimizationRoutesService {
           this.buildOptimizationModel(routable, settings),
         );
         return {
-          route: this.processGoogleMapsResponse(apiResponse, routable, settings),
+          route: this.processGoogleMapsResponse(apiResponse, routable, settings, unassignedOrders),
           apiResponse,
         };
       } catch (error) {
@@ -667,8 +667,21 @@ export class OptimizationRoutesService {
     response: any,
     routable: RoutableStop[],
     settings: RoutingSettings,
+    unassignedOrders: UnassignedOrderDto[] = [],
   ): OptimizedRoute {
     const optimizationResult = response[0];
+
+    // O Google pode deixar entregas de fora (skippedShipments). Antes elas
+    // sumiam: o pedido continuava pendente e ninguém sabia por quê.
+    for (const pulado of optimizationResult?.skippedShipments ?? []) {
+      const entry = routable[Number(pulado.index ?? 0)];
+      if (!entry) continue;
+      const codigos: string[] = (pulado.reasons ?? []).map((reason: any) => String(reason.code));
+      unassignedOrders.push({
+        orderId: entry.order.order_id,
+        reason: describeSkipReason(codigos),
+      });
+    }
 
     if (
       !optimizationResult ||
@@ -798,3 +811,22 @@ export class OptimizationRoutesService {
     ).toISOString();
   }
 }
+
+/** Motivo, em português, de uma entrega que o Google deixou fora da rota. */
+export function describeSkipReason(codes: string[]): string {
+  const textos: Record<string, string> = {
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TIME_WINDOWS:
+      'não cabe no expediente (horário de operação e tempo por parada da empresa) ou o endereço está longe demais',
+    DEMAND_EXCEEDS_VEHICLE_CAPACITY: 'a quantidade excede a capacidade do veículo',
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_DISTANCE_LIMIT: 'passa do limite de distância do veículo',
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_DURATION_LIMIT: 'passa do limite de duração da rota',
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TRAVEL_DURATION_LIMIT: 'passa do limite de tempo de viagem',
+    VEHICLE_NOT_ALLOWED: 'o veículo não pode atender este pedido',
+    NO_VEHICLE: 'nenhum veículo disponível para o pedido',
+  };
+  const motivos = [...new Set(codes.map((code) => textos[code] ?? code))].filter(Boolean);
+  return motivos.length
+    ? `Fora da rota otimizada: ${motivos.join('; ')}`
+    : 'Fora da rota otimizada pelo Google (sem motivo informado)';
+}
+

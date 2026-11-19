@@ -26,7 +26,7 @@ import { ImportResultDto, OrderSuccessDto, OrderFailureDto } from '../dto/import
 import { RejectedFileListDto, RejectedFileDto } from '../dto/rejected-file-list.dto';
 import { FindRejectedFilesDto } from '../dto/find-rejected-files.dto';
 import { config } from '../../../config/env.config';
-import { buildTemplateCsv, normalizeUrgency, type DriverVehiclePair } from '../import-template';
+import { buildTemplateCsv, normalizeUrgency, pickDriverVehiclePairs } from '../import-template';
 
 type TenantReferenceIds = {
   clientIds: Set<number>;
@@ -376,27 +376,14 @@ export class OrderImportsService {
       this.driverRepository.find({
         where: { id_company: idCompany },
         select: { driver_id: true, status: true },
-        order: { driver_id: 'ASC' },
       }),
       this.vehicleRepository.find({
         where: { id_company: idCompany },
-        select: { vehicle_id: true, status: true },
-        order: { vehicle_id: 'ASC' },
+        select: { vehicle_id: true, status: true, driver_id: true },
       }),
     ]);
 
-    // Prefere quem está ativo; sem ninguém ativo, usa o que houver.
-    const ativos = <T extends { status?: string }>(lista: T[], inativos: string[]) => {
-      const filtrados = lista.filter((item) => !inativos.includes(item.status ?? ''));
-      return filtrados.length ? filtrados : lista;
-    };
-    const motoristas = ativos(drivers, ['inactive']);
-    const veiculos = ativos(vehicles, ['inactive', 'maintenance']);
-
-    const pares: DriverVehiclePair[] = [];
-    for (let i = 0; i < Math.min(2, motoristas.length, veiculos.length); i++) {
-      pares.push({ driverId: motoristas[i].driver_id, vehicleId: veiculos[i].vehicle_id });
-    }
+    const pares = pickDriverVehiclePairs(drivers, vehicles);
     return buildTemplateCsv(pares, Number(format(new Date(), 'yyMMdd')) * 100);
   }
 

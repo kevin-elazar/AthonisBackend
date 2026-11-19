@@ -59,6 +59,65 @@ export interface DriverVehiclePair {
   vehicleId: number;
 }
 
+export interface TemplateDriver {
+  driver_id: number;
+  status?: string | null;
+}
+
+export interface TemplateVehicle {
+  vehicle_id: number;
+  status?: string | null;
+  driver_id?: number | null;
+}
+
+/**
+ * Escolhe até `max` pares motorista + veículo para o modelo.
+ *
+ * Primeiro o veículo com o seu motorista habitual (o vínculo do cadastro);
+ * depois os veículos livres com os motoristas que sobraram. Motorista
+ * "unavailable" e veículo em manutenção ou inativo ficam de fora, salvo se
+ * não houver mais ninguém.
+ */
+export function pickDriverVehiclePairs(
+  drivers: TemplateDriver[],
+  vehicles: TemplateVehicle[],
+  max = 2,
+): DriverVehiclePair[] {
+  const preferir = <T>(lista: T[], ok: (item: T) => boolean) => {
+    const bons = lista.filter(ok);
+    return bons.length ? bons : lista;
+  };
+  const motoristas = preferir(
+    [...drivers].sort((a, b) => a.driver_id - b.driver_id),
+    (d) => d.status !== 'unavailable',
+  );
+  const veiculos = preferir(
+    [...vehicles].sort((a, b) => a.vehicle_id - b.vehicle_id),
+    (v) => v.status !== 'maintenance' && v.status !== 'inactive',
+  );
+
+  const pares: DriverVehiclePair[] = [];
+  const usados = new Set<number>();
+  const veiculosLivres: TemplateVehicle[] = [];
+
+  for (const veiculo of veiculos) {
+    const habitual = motoristas.find((m) => m.driver_id === veiculo.driver_id);
+    if (habitual && !usados.has(habitual.driver_id)) {
+      pares.push({ driverId: habitual.driver_id, vehicleId: veiculo.vehicle_id });
+      usados.add(habitual.driver_id);
+    } else {
+      veiculosLivres.push(veiculo);
+    }
+  }
+  for (const veiculo of veiculosLivres) {
+    const livre = motoristas.find((m) => !usados.has(m.driver_id));
+    if (!livre) break;
+    pares.push({ driverId: livre.driver_id, vehicleId: veiculo.vehicle_id });
+    usados.add(livre.driver_id);
+  }
+  return pares.slice(0, max);
+}
+
 /** Valor seguro numa célula: sem o separador, sem aspas e sem fórmula de planilha. */
 function cell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '';

@@ -421,5 +421,44 @@ describe('OptimizationRoutesService', () => {
       // um instante do Google mal interpretado.
       expect(chegada - antes).toBeLessThan(24 * 60 * 60 * 1000);
     });
+      it('pedido que o Google deixa de fora volta com o motivo, em vez de sumir', () => {
+      const dois = [
+        ...routable,
+        { order: { ...mockOrderValid, order_id: 99 }, coordinates: { latitude: -26.5, longitude: -49.1 } },
+      ];
+      const respostaGoogle = [
+        {
+          routes: [
+            {
+              visits: [{ shipmentIndex: 0, isPickup: false }],
+              metrics: { travelDistanceMeters: 5000, totalDuration: { seconds: 600 } },
+            },
+          ],
+          skippedShipments: [
+            { index: 1, reasons: [{ code: 'CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TIME_WINDOWS' }] },
+          ],
+        },
+      ];
+      const fora: { orderId: number; reason: string }[] = [];
+
+      const rota = (service as any).processGoogleMapsResponse(respostaGoogle, dois, settings, fora);
+
+      expect(rota.stops).toHaveLength(1);
+      expect(fora).toEqual([
+        { orderId: 99, reason: expect.stringContaining('não cabe no expediente') },
+      ]);
+    });
+  });
+});
+
+
+describe('describeSkipReason', () => {
+  const { describeSkipReason } = jest.requireActual('@/optimization-routes/services/optimization-routes.service');
+  it.each([
+    [['DEMAND_EXCEEDS_VEHICLE_CAPACITY'], 'capacidade do veículo'],
+    [['CODIGO_NOVO'], 'CODIGO_NOVO'],
+    [[], 'sem motivo informado'],
+  ])('%j → %s', (codes, trecho) => {
+    expect(describeSkipReason(codes)).toContain(trecho);
   });
 });
