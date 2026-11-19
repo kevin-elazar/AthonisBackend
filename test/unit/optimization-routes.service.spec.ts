@@ -462,3 +462,18 @@ describe('describeSkipReason', () => {
     expect(describeSkipReason(codes)).toContain(trecho);
   });
 });
+
+describe('plannedDateFor', () => {
+  const { plannedDateFor } = jest.requireActual('@/optimization-routes/services/optimization-routes.service');
+  const agora = new Date('2026-11-19T02:30:00Z'); // 23:30 de 18/11 em Brasília
+
+  it('usa a data de entrega mais cedo dos pedidos', () => {
+    expect(
+      plannedDateFor([{ delivery_date: '2026-11-21' }, { delivery_date: '2026-11-20' }, {}], 'America/Sao_Paulo', agora),
+    ).toBe('2026-11-20');
+  });
+
+  it('sem data nos pedidos, vale hoje no fuso da empresa', () => {
+    expect(plannedDateFor([{}, { delivery_date: null }], 'America/Sao_Paulo', agora)).toBe('2026-11-18');
+  });
+});

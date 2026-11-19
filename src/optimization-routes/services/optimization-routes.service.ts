@@ -20,7 +20,7 @@ import { config } from '../../config/env.config';
 import { CompanyService, RoutingSettings } from '../../modules/company/services/company.service';
 import { Route } from '../../shared/entities/route.entity';
 import { AddressCoordinatesService } from './address-coordinates.service';
-import { parseWindowText, zonedTimeToUtc } from '../../shared/domain/timezone';
+import { parseWindowText, todayInTimeZone, zonedTimeToUtc } from '../../shared/domain/timezone';
 
 type RoutableStop = { order: any; coordinates: GeocodingResult };
 
@@ -182,7 +182,7 @@ export class OptimizationRoutesService {
 
         // A rota vira registro próprio aqui. O histórico é auditoria da
         // chamada à API; é esta parte que a operação manipula depois.
-        await this.persistRoutes(routes, historico.id);
+        await this.persistRoutes(routes, historico.id, settings.timezone);
       } catch (persistError) {
         this.logger.error('Erro ao gravar as rotas geradas:', persistError);
 
@@ -274,7 +274,11 @@ export class OptimizationRoutesService {
    * pedaço do JSON do histórico, e não haveria como responder "em que rota
    * está este pedido", iniciar a rota ou apagar uma sem apagar as irmãs.
    */
-  private async persistRoutes(routes: OptimizedRoute[], historyId: number): Promise<void> {
+  private async persistRoutes(
+    routes: OptimizedRoute[],
+    historyId: number,
+    timezone: string,
+  ): Promise<void> {
     if (routes.length === 0) return;
 
     const idCompany = this.tenantContext.getIdCompany();
@@ -299,7 +303,7 @@ export class OptimizationRoutesService {
             driver_id: rota.driverId ?? undefined,
             vehicle_id: rota.vehicleId ?? undefined,
             status: 'planned' as const,
-            planned_date: primeiro?.delivery_date,
+            planned_date: plannedDateFor(pedidos, timezone) as unknown as Date,
             total_distance_m: Math.round(rota.totalDistance ?? 0),
             total_duration_min: Math.round(rota.totalDuration ?? 0),
             simulated: rota.mode === 'simulated',
@@ -828,5 +832,22 @@ export function describeSkipReason(codes: string[]): string {
   return motivos.length
     ? `Fora da rota otimizada: ${motivos.join('; ')}`
     : 'Fora da rota otimizada pelo Google (sem motivo informado)';
+}
+
+/**
+ * Dia planejado da rota: a data de entrega mais cedo entre os pedidos, ou hoje
+ * no fuso da empresa quando nenhum tem data. Sem isso a rota ficava sem dia e
+ * sumia dos indicadores e dos percursos, que filtram por período.
+ */
+export function plannedDateFor(
+  pedidos: Array<{ delivery_date?: string | Date | null }>,
+  timezone: string,
+  agora: Date = new Date(),
+): string {
+  const datas = pedidos
+    .map((pedido) => (pedido.delivery_date ? String(pedido.delivery_date).slice(0, 10) : null))
+    .filter((data): data is string => !!data && /^\d{4}-\d{2}-\d{2}$/.test(data))
+    .sort();
+  return datas[0] ?? todayInTimeZone(timezone, agora);
 }
 
