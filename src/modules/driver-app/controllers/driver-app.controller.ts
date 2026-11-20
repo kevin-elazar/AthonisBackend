@@ -15,7 +15,7 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { AllowDriver } from '../../auth/decorators/allow-driver.decorator';
 import { DriverRoutesService } from '../services/driver-routes.service';
-import { FindDriverRoutesDto } from '../dto/find-driver-routes.dto';
+import { FindDriverRoutesDto, FindDriverRoutesRangeDto } from '../dto/find-driver-routes.dto';
 import {
   CancelRouteDto,
   DeliverStopDto,
@@ -67,6 +67,16 @@ export class DriverAppController {
   })
   findRoutes(@Query() query: FindDriverRoutesDto) {
     return this.driverRoutesService.findRoutes(query.date);
+  }
+
+  @Get('routes/range')
+  @ApiOperation({
+    summary: 'Rotas do motorista num período',
+    description:
+      'Para a tela "Minhas rotas": próximas e anteriores, sem as canceladas, no máximo 62 dias. Cada rota vem com as paradas.',
+  })
+  findRoutesInRange(@Query() query: FindDriverRoutesRangeDto) {
+    return this.driverRoutesService.findRoutesInRange(query.from, query.to);
   }
 
   @Get('routes/:id')

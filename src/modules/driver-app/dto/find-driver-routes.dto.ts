@@ -11,3 +11,13 @@ export class FindDriverRoutesDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date deve estar no formato AAAA-MM-DD' })
   date?: string;
 }
+
+export class FindDriverRoutesRangeDto {
+  @ApiProperty({ description: 'Primeiro dia (AAAA-MM-DD)', example: '2026-11-10' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from deve estar no formato AAAA-MM-DD' })
+  from!: string;
+
+  @ApiProperty({ description: 'Último dia (AAAA-MM-DD), no máximo 62 dias depois de from', example: '2026-11-30' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to deve estar no formato AAAA-MM-DD' })
+  to!: string;
+}

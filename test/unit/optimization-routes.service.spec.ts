@@ -283,6 +283,58 @@ describe('OptimizationRoutesService', () => {
       expect(result.routes[0].stops).toHaveLength(1);
       expect(historyService.create).toHaveBeenCalled();
     });
+
+    it('pedidos de dias diferentes do mesmo motorista viram uma rota por dia', async () => {
+      const qb = orderRepository.createQueryBuilder() as unknown as { getMany: jest.Mock };
+      qb.getMany.mockResolvedValueOnce([
+        { ...mockOrderValid, order_id: 1, delivery_date: '2099-11-19' },
+        { ...mockOrderValid, order_id: 4, delivery_date: '2099-11-20' },
+        { ...mockOrderValid, order_id: 5, delivery_date: '2099-11-19' },
+      ]);
+      jest.spyOn(orderRepository, 'find').mockResolvedValue([
+        { ...mockOrderValid, order_id: 1 },
+        { ...mockOrderValid, order_id: 4 },
+        { ...mockOrderValid, order_id: 5 },
+      ] as Order[]);
+
+      const result = await service.optimizeRoutes([1, 4, 5]);
+
+      expect(result.totalRoutes).toBe(2);
+      const porDia = Object.fromEntries(
+        result.routes.map((rota) => [rota.plannedDate, rota.stops.map((stop) => stop.orderId).sort()]),
+      );
+      expect(porDia).toEqual({ '2099-11-19': [1, 5], '2099-11-20': [4] });
+      const gravadas = mockManager.create.mock.calls.map(([, dados]) => (dados as any).planned_date);
+      expect(gravadas.sort()).toEqual(['2099-11-19', '2099-11-20']);
+    });
+
+    it('com o dia escolhido, tudo vai para uma rota nesse dia e a data dos pedidos muda', async () => {
+      const qb = orderRepository.createQueryBuilder() as unknown as { getMany: jest.Mock };
+      qb.getMany.mockResolvedValueOnce([
+        { ...mockOrderValid, order_id: 1, delivery_date: '2099-11-19' },
+        { ...mockOrderValid, order_id: 4, delivery_date: '2099-11-20' },
+      ]);
+      jest.spyOn(orderRepository, 'find').mockResolvedValue([
+        { ...mockOrderValid, order_id: 1 },
+        { ...mockOrderValid, order_id: 4 },
+      ] as Order[]);
+
+      const result = await service.optimizeRoutes([1, 4], '2099-12-01');
+
+      expect(result.totalRoutes).toBe(1);
+      expect(result.routes[0].plannedDate).toBe('2099-12-01');
+      expect((mockManager.create.mock.calls[0][1] as any).planned_date).toBe('2099-12-01');
+      for (const [, , dados] of mockManager.update.mock.calls) {
+        expect(dados).toMatchObject({ delivery_date: '2099-12-01' });
+      }
+    });
+
+    it('recusa dia escolhido no passado', async () => {
+      jest.spyOn(orderRepository, 'find').mockResolvedValue([mockOrderValid] as Order[]);
+      await expect(service.optimizeRoutes([1], '2020-01-01')).rejects.toThrow(
+        'O dia da rota não pode ser anterior a hoje',
+      );
+    });
   });
 
   /**
@@ -475,5 +527,31 @@ describe('plannedDateFor', () => {
 
   it('sem data nos pedidos, vale hoje no fuso da empresa', () => {
     expect(plannedDateFor([{}, { delivery_date: null }], 'America/Sao_Paulo', agora)).toBe('2026-11-18');
+  });
+});
+
+describe('groupOrdersForRoutes', () => {
+  const { groupOrdersForRoutes } = jest.requireActual('@/optimization-routes/services/optimization-routes.service');
+  const agora = new Date('2026-11-19T12:00:00Z');
+
+  it('separa por veículo, motorista e dia; pedido sem data vai para hoje', () => {
+    const grupos = groupOrdersForRoutes(
+      [
+        { order_id: 1, vehicle_id: 1, driver_id: 1, delivery_date: '2026-11-19' },
+        { order_id: 2, vehicle_id: 1, driver_id: 1, delivery_date: '2026-11-20' },
+        { order_id: 3, vehicle_id: 1, driver_id: 1 },
+        { order_id: 4, vehicle_id: 2, driver_id: 2, delivery_date: '2026-11-19' },
+      ],
+      'America/Sao_Paulo',
+      agora,
+    );
+    const resumo = Object.fromEntries(
+      [...grupos].map(([chave, pedidos]: [string, any[]]) => [chave, pedidos.map((p) => p.order_id)]),
+    );
+    expect(resumo).toEqual({
+      '1-1-2026-11-19': [1, 3],
+      '1-1-2026-11-20': [2],
+      '2-2-2026-11-19': [4],
+    });
   });
 });

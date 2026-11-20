@@ -96,7 +96,7 @@ export class OptimizationRoutesService {
     }
   }
 
-  async optimizeRoutes(orderIds: number[]): Promise<OptimizationResultDto> {
+  async optimizeRoutes(orderIds: number[], plannedDate?: string): Promise<OptimizationResultDto> {
     const startTime = Date.now();
     let googleApiResponse: any = null;
     // A execução já rendeu um registro de auditoria: um segundo registro, de
@@ -123,6 +123,17 @@ export class OptimizationRoutesService {
       // Depósito, custos e tempo de parada vêm do cadastro da empresa.
       const settings = await this.companyService.getRoutingSettings();
 
+      if (plannedDate && plannedDate < todayInTimeZone(settings.timezone)) {
+        throw new HttpException(
+          {
+            success: false,
+            message: 'O dia da rota não pode ser anterior a hoje',
+            unassignedOrders,
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
       if (settings.usingFallbackDepot) {
         this.logger.warn(
           'Empresa sem depósito cadastrado: as rotas partem do ponto padrão em São Paulo.',
@@ -130,7 +141,12 @@ export class OptimizationRoutesService {
       }
 
       const orders = await this.getOrdersWithDetails(validation.validOrders);
-      const groupedOrders = this.groupOrdersByVehicleAndDriver(orders);
+      // Dia escolhido: vale para todos os pedidos, inclusive para as janelas
+      // de horário que vão ao otimizador.
+      if (plannedDate) {
+        for (const order of orders) order.delivery_date = plannedDate;
+      }
+      const groupedOrders = groupOrdersForRoutes(orders, settings.timezone);
 
       const { routes, apiResponses } = await this.buildRoutesForGroups(
         groupedOrders,
@@ -182,7 +198,7 @@ export class OptimizationRoutesService {
 
         // A rota vira registro próprio aqui. O histórico é auditoria da
         // chamada à API; é esta parte que a operação manipula depois.
-        await this.persistRoutes(routes, historico.id, settings.timezone);
+        await this.persistRoutes(routes, historico.id, settings.timezone, plannedDate);
       } catch (persistError) {
         this.logger.error('Erro ao gravar as rotas geradas:', persistError);
 
@@ -278,6 +294,7 @@ export class OptimizationRoutesService {
     routes: OptimizedRoute[],
     historyId: number,
     timezone: string,
+    plannedDate?: string,
   ): Promise<void> {
     if (routes.length === 0) return;
 
@@ -303,7 +320,9 @@ export class OptimizationRoutesService {
             driver_id: rota.driverId ?? undefined,
             vehicle_id: rota.vehicleId ?? undefined,
             status: 'planned' as const,
-            planned_date: plannedDateFor(pedidos, timezone) as unknown as Date,
+            planned_date: (rota.plannedDate ??
+              plannedDate ??
+              plannedDateFor(pedidos, timezone)) as unknown as Date,
             total_distance_m: Math.round(rota.totalDistance ?? 0),
             total_duration_min: Math.round(rota.totalDuration ?? 0),
             simulated: rota.mode === 'simulated',
@@ -344,6 +363,8 @@ export class OptimizationRoutesService {
               // Sem geocoding real a coordenada é estimada: sem a chave, o
               // pedido é localizado de novo quando o Google for configurado.
               delivery_geocoded_address: geocodingReal ? (chave ?? undefined) : null,
+              // O dia escolhido no "Gerar rota" passa a ser a data de entrega.
+              ...(plannedDate ? { delivery_date: plannedDate as unknown as Date } : {}),
               updated_by: autor,
             },
           );
@@ -391,20 +412,6 @@ export class OptimizationRoutesService {
       .getMany();
   }
 
-  private groupOrdersByVehicleAndDriver(orders: any[]): Map<string, any[]> {
-    const grouped = new Map<string, any[]>();
-
-    orders.forEach((order) => {
-      const key = `${order.vehicle_id}-${order.driver_id}`;
-      if (!grouped.has(key)) {
-        grouped.set(key, []);
-      }
-      grouped.get(key).push(order);
-    });
-
-    return grouped;
-  }
-
   private async buildRoutesForGroups(
     groupedOrders: Map<string, any[]>,
     unassignedOrders: UnassignedOrderDto[],
@@ -421,6 +428,7 @@ export class OptimizationRoutesService {
           settings,
         );
         if (route) {
+          route.plannedDate = plannedDateFor(orders, settings.timezone);
           routes.push(route);
           if (apiResponse) {
             apiResponses.push(apiResponse);
@@ -832,6 +840,27 @@ export function describeSkipReason(codes: string[]): string {
   return motivos.length
     ? `Fora da rota otimizada: ${motivos.join('; ')}`
     : 'Fora da rota otimizada pelo Google (sem motivo informado)';
+}
+
+/**
+ * Separa os pedidos em rotas: uma por veículo + motorista + dia de entrega.
+ *
+ * Antes o dia não entrava na chave: pedidos de 19 e 20 com o mesmo motorista
+ * viravam uma rota só, com um expediente de dois dias, e o otimizador podia
+ * espalhar as paradas pelos dois. Pedido sem data vai para hoje.
+ */
+export function groupOrdersForRoutes<
+  T extends { vehicle_id?: number | null; driver_id?: number | null; delivery_date?: string | Date | null },
+>(orders: T[], timezone: string, agora: Date = new Date()): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const order of orders) {
+    const dia = plannedDateFor([order], timezone, agora);
+    const key = `${order.vehicle_id}-${order.driver_id}-${dia}`;
+    const grupo = grouped.get(key);
+    if (grupo) grupo.push(order);
+    else grouped.set(key, [order]);
+  }
+  return grouped;
 }
 
 /**

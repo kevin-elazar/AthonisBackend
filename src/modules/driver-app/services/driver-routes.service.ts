@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Not, Repository } from 'typeorm';
+import { Between, DataSource, In, Not, Repository } from 'typeorm';
 import { Route } from '../../../shared/entities/route.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
@@ -41,6 +41,8 @@ const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
 /** Linhas por INSERT ao gravar o rastro: mantém o comando abaixo do limite de parâmetros do SQLite. */
 const PING_INSERT_CHUNK = 50;
+/** Maior período aceito na lista de rotas do motorista. */
+const MAX_RANGE_DAYS = 62;
 
 /** Relógio do aparelho adiantado além disto é tratado como erro e trocado pela hora do servidor. */
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -179,6 +181,30 @@ export class DriverRoutesService {
         },
         { id_company: idCompany, driver_id: driverId, status: 'active' },
       ],
+      relations: ['vehicle'],
+      order: { planned_date: 'ASC', route_id: 'ASC' },
+    });
+
+    return this.toViews(routes);
+  }
+
+  /** Rotas de um período, para a lista "Minhas rotas" do aplicativo. */
+  async findRoutesInRange(from: string, to: string): Promise<DriverRouteView[]> {
+    if (from > to) {
+      throw new BadRequestException('O primeiro dia do período deve vir antes do último');
+    }
+    const dias = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
+    if (!Number.isFinite(dias) || dias > MAX_RANGE_DAYS) {
+      throw new BadRequestException(`O período pode ter no máximo ${MAX_RANGE_DAYS} dias`);
+    }
+
+    const routes = await this.routeRepository.find({
+      where: {
+        id_company: this.tenantContext.getIdCompany(),
+        driver_id: this.driverId(),
+        planned_date: Between(from, to) as unknown as Date,
+        status: Not('cancelled'),
+      },
       relations: ['vehicle'],
       order: { planned_date: 'ASC', route_id: 'ASC' },
     });

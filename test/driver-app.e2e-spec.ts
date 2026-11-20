@@ -120,6 +120,43 @@ describe('Aplicativo do entregador (e2e)', () => {
       );
     });
 
+    it('lista as rotas de um período, sem as canceladas e sem as de outro motorista', async () => {
+      const futura = await seedRoute(dataSource, anaDriverId, 2, { planned_date: '2030-01-20' as unknown as Date });
+      const passada = await seedRoute(dataSource, anaDriverId, 1, {
+        planned_date: '2030-01-05' as unknown as Date,
+        status: 'completed',
+      });
+      await seedRoute(dataSource, anaDriverId, 1, {
+        planned_date: '2030-01-10' as unknown as Date,
+        status: 'cancelled',
+      });
+      await seedRoute(dataSource, brunoDriverId, 1, { planned_date: '2030-01-12' as unknown as Date });
+
+      const res = await http()
+        .get('/driver/routes/range?from=2030-01-01&to=2030-01-31')
+        .set('Authorization', `Bearer ${tokenAna}`)
+        .expect(200);
+
+      expect(res.body.map((route: { route_id: number }) => route.route_id)).toEqual([
+        passada.route.route_id,
+        futura.route.route_id,
+      ]);
+      expect(res.body[1].planned_date).toBe('2030-01-20');
+      expect(res.body[1].stops).toHaveLength(2);
+    });
+
+    it.each([
+      ['from=2030-02-01&to=2030-01-01', 'antes do último'],
+      ['from=2030-01-01&to=2030-06-01', 'no máximo 62 dias'],
+      ['from=01/01/2030&to=2030-01-31', 'AAAA-MM-DD'],
+    ])('recusa o período inválido (%s)', async (query, trecho) => {
+      const res = await http()
+        .get(`/driver/routes/range?${query}`)
+        .set('Authorization', `Bearer ${tokenAna}`)
+        .expect(400);
+      expect(JSON.stringify(res.body)).toContain(trecho);
+    });
+
     it('responde 404 para a rota de outro motorista', async () => {
       await http()
         .get(`/driver/routes/${rotaDoBruno.route_id}`)
