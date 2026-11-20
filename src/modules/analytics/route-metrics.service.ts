@@ -1,3 +1,4 @@
+import { ordersOfRoutes } from '../routes/route-stops';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -50,10 +51,7 @@ export class RouteMetricsService {
     if (!route) return null;
 
     const [orders, events, pings, history] = await Promise.all([
-      this.orderRepository.find({
-        where: { route_id: routeId, id_company: idCompany },
-        order: { stop_sequence: 'ASC' },
-      }),
+      ordersOfRoutes(this.orderRepository.manager, idCompany, [routeId]),
       this.eventRepository.find({ where: { route_id: routeId, id_company: idCompany } }),
       this.pingRepository.find({
         where: { route_id: routeId, id_company: idCompany },

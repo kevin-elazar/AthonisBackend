@@ -173,6 +173,24 @@ function dayStartMs(offset) {
 
 // ------------------------------------------------------------------ limpeza
 
+/**
+ * Cria a parada (tentativa de entrega) de cada pedido da rota em
+ * route_stop, com a situação atual do pedido. Sem isso a rota aparece vazia:
+ * as telas leem as paradas de route_stop.
+ */
+async function syncRouteStops(routeId) {
+  await run(
+    `INSERT INTO route_stop (id_company, route_id, order_id, attempt, stop_sequence, status, completed_at)
+     SELECT o.id_company, o.route_id, o.order_id, 1, o.stop_sequence,
+            CASE WHEN o.status IN ('delivered', 'failed', 'in_route') THEN o.status ELSE 'planned' END,
+            CASE WHEN o.status = 'delivered' THEN o.delivered_at END
+       FROM "order" o
+      WHERE o.route_id = ?
+        AND NOT EXISTS (SELECT 1 FROM route_stop s WHERE s.route_id = o.route_id AND s.order_id = o.order_id)`,
+    [routeId],
+  );
+}
+
 async function clean() {
   const routes = await all(
     "SELECT route_id, history_id FROM route WHERE created_by = ?",
@@ -190,6 +208,7 @@ async function clean() {
       `DELETE FROM route_execution_metrics WHERE route_id IN (${marks})`,
       ids,
     );
+    await run(`DELETE FROM route_stop WHERE route_id IN (${marks})`, ids);
     await run(`DELETE FROM "order" WHERE route_id IN (${marks})`, ids);
     await run(`DELETE FROM route WHERE route_id IN (${marks})`, ids);
   }
@@ -424,6 +443,8 @@ async function createRoute({
       );
     }
   }
+
+  await syncRouteStops(routeId);
 
   await run(
     "UPDATE route SET status = ?, started_at = ?, finished_at = ? WHERE route_id = ?",

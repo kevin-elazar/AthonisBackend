@@ -10,6 +10,7 @@ import { Vehicle } from '@/shared/entities/vehicle.entity';
 import { RouteEvent } from '@/shared/entities/route-event.entity';
 import { RouteReturnedStop } from '@/shared/entities/route-returned-stop.entity';
 import { Company } from '@/shared/entities/company.entity';
+import { RouteStop } from '@/shared/entities/route-stop.entity';
 import { TenantContextService } from '@/shared/tenant/tenant-context.service';
 
 /**
@@ -21,6 +22,9 @@ describe('RoutesService', () => {
   let service: RoutesService;
   let routeRepository: Repository<Route>;
   let orderRepository: Repository<Order>;
+
+  /** O EntityManager falso: é por ele que as paradas (route_stop) são lidas. */
+  let managerAtual: { find: jest.Mock };
 
   /** Registra o que a transação escreveu, por entidade. */
   let escritas: Array<{ entidade: unknown; criterio: unknown; dados: Record<string, unknown> }>;
@@ -50,7 +54,26 @@ describe('RoutesService', () => {
         escritas.push({ entidade, criterio, dados: { __delete: true } });
         return { affected: 1 };
       }),
+      // As paradas da rota vêm de route_stop: uma por pedido da rota.
+      find: jest.fn(async (entidade: unknown) => {
+        if (entidade === RouteStop) {
+          return pedidos
+            .filter((item) => item.route_id === 7)
+            .map((item) => ({
+              id: item.order_id,
+              route_id: 7,
+              order_id: item.order_id,
+              attempt: 1,
+              stop_sequence: item.stop_sequence,
+              status: ['delivered', 'failed', 'in_route'].includes(item.status) ? item.status : 'planned',
+            }));
+        }
+        if (entidade === Order) return pedidos;
+        return [];
+      }),
+      count: jest.fn(async () => 0),
     };
+    managerAtual = manager;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -81,6 +104,7 @@ describe('RoutesService', () => {
           provide: DataSource,
           useValue: {
             transaction: jest.fn(async (cb: (m: unknown) => Promise<void>) => cb(manager)),
+            manager,
           },
         },
         {
@@ -190,8 +214,8 @@ describe('RoutesService', () => {
 
       expect(rotas).toHaveLength(1);
       expect(rotas[0].orders).toHaveLength(2);
-      // Uma consulta de pedidos para todas as rotas, não uma por rota.
-      expect(orderRepository.find).toHaveBeenCalledTimes(1);
+      // Uma consulta de paradas para todas as rotas, não uma por rota.
+      expect(managerAtual.find.mock.calls.filter(([entidade]) => entidade === RouteStop)).toHaveLength(1);
       expect(routeRepository.find).toHaveBeenCalledTimes(1);
     });
   });
@@ -216,8 +240,18 @@ describe('RoutesService', () => {
           return qb;
         }),
         execute: jest.fn(async () => ({ affected: afetados[chamada++] ?? 1 })),
+        insert: jest.fn(() => insercao),
+      };
+      // A criação das paradas da rota nova (route_stop).
+      const insercao: any = {
+        into: jest.fn(() => insercao),
+        values: jest.fn(() => insercao),
+        orIgnore: jest.fn(() => insercao),
+        execute: jest.fn(async () => ({ identifiers: [] })),
       };
       const manager = {
+        find: jest.fn(async () => []),
+        count: jest.fn(async () => 0),
         create: jest.fn((_entidade: unknown, dados: object) => dados),
         save: jest.fn(async (dados: object) => ({ ...dados, route_id: 99 })),
         createQueryBuilder: jest.fn(() => qb),
@@ -238,7 +272,10 @@ describe('RoutesService', () => {
         count: jest.fn().mockResolvedValue(2),
         find: jest.fn().mockResolvedValue(devolvidas),
       };
-      const dataSource = { transaction: jest.fn(async (cb: (m: unknown) => unknown) => cb(manager)) };
+      const dataSource = {
+        transaction: jest.fn(async (cb: (m: unknown) => unknown) => cb(manager)),
+        manager,
+      };
       const tenant = {
         getIdCompany: jest.fn().mockReturnValue(1),
         getUser: jest.fn().mockReturnValue({ email: 'admin@athonis.com' }),
@@ -256,16 +293,18 @@ describe('RoutesService', () => {
         tenant as any,
       );
       jest.spyOn(svc, 'findOne').mockResolvedValue({ route_id: 99 } as any);
-      return { svc, wheres, qb };
+      return { svc, wheres, qb, insercao };
     };
 
     it('toma só pedidos ainda livres na fila', async () => {
-      const { svc, wheres, qb } = montarDuplicacao([1, 1]);
+      const { svc, wheres, qb, insercao } = montarDuplicacao([1, 1]);
 
       await expect(svc.duplicate(7)).resolves.toMatchObject({ route_id: 99 });
 
       expect(qb.execute).toHaveBeenCalledTimes(2);
       expect(wheres).toEqual(expect.arrayContaining(['route_id IS NULL', 'status = :pending']));
+      // Uma tentativa nova por pedido levado para a rota duplicada.
+      expect(insercao.execute).toHaveBeenCalledTimes(2);
     });
 
     it('responde 409 e desfaz tudo se outro processo levou um pedido no meio', async () => {

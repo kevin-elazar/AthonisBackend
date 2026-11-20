@@ -9,6 +9,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, In, Not, Repository } from 'typeorm';
+import { RouteStop } from '../../../shared/entities/route-stop.entity';
+import { ordersOfRoutes } from '../../routes/route-stops';
 import { Route } from '../../../shared/entities/route.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
@@ -83,6 +85,15 @@ export interface DriverStopView {
   completed_at: string | null;
   occurrence_type: string | null;
   notes: string | null;
+  /** Número da tentativa de entrega deste pedido (1 na primeira vez). */
+  attempt: number;
+  /** A tentativa anterior que não deu certo, para o motorista saber o que houve. */
+  previous_attempt: {
+    route_id: number;
+    occurred_at: string | null;
+    occurrence_type: string | null;
+    notes: string | null;
+  } | null;
 }
 
 export interface DriverRouteView {
@@ -287,10 +298,7 @@ export class DriverRoutesService {
     const occurredAt = this.occurredAt(dto, route);
 
     if (route.status === 'active') {
-      const orders = await this.orderRepository.find({
-        where: { route_id: routeId, id_company: route.id_company },
-        order: { stop_sequence: 'ASC' },
-      });
+      const orders = await ordersOfRoutes(this.dataSource.manager, route.id_company, [routeId]);
       const abertas = orders.filter((order) => !FINAL_STOP_STATUSES.includes(order.status));
 
       if (abertas.length > 0) {
@@ -479,6 +487,13 @@ export class DriverRoutesService {
         if (!result.affected) {
           throw new ConflictException('Esta parada já foi encerrada');
         }
+
+        // A tentativa desta rota guarda o resultado, com a hora da baixa.
+        await manager.update(
+          RouteStop,
+          { route_id: route.route_id, order_id: orderId },
+          { status, completed_at: occurredAt },
+        );
       });
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -649,6 +664,41 @@ export class DriverRoutesService {
   }
 
   /**
+   * A última ocorrência de cada pedido numa rota anterior à atual: o que deu
+   * errado na tentativa passada (cliente ausente, endereço não encontrado...).
+   */
+  private async previousFailures(
+    orders: Array<{ order_id: number; route_id?: number }>,
+    idCompany: number,
+  ): Promise<Map<string, DriverStopView['previous_attempt']>> {
+    const result = new Map<string, DriverStopView['previous_attempt']>();
+    if (orders.length === 0) return result;
+
+    const falhas = await this.eventRepository.find({
+      where: {
+        order_id: In([...new Set(orders.map((order) => order.order_id))]),
+        id_company: idCompany,
+        type: 'failed',
+      },
+      order: { occurred_at: 'ASC' },
+    });
+    for (const order of orders) {
+      const anteriores = falhas.filter(
+        (event) => event.order_id === order.order_id && event.route_id < (order.route_id ?? 0),
+      );
+      const ultima = anteriores[anteriores.length - 1];
+      if (!ultima) continue;
+      result.set(`${order.route_id}:${order.order_id}`, {
+        route_id: ultima.route_id,
+        occurred_at: toIso(ultima.occurred_at),
+        occurrence_type: ultima.occurrence_type ?? null,
+        notes: ultima.notes ?? null,
+      });
+    }
+    return result;
+  }
+
+  /**
    * Monta a visão do aplicativo para várias rotas com um número fixo de
    * consultas (pedidos, eventos e históricos), independente de quantas
    * rotas ou paradas existam.
@@ -663,11 +713,7 @@ export class DriverRoutesService {
     ];
 
     const [orders, events, histories] = await Promise.all([
-      this.orderRepository.find({
-        where: { route_id: In(routeIds), id_company: idCompany },
-        relations: ['client'],
-        order: { stop_sequence: 'ASC' },
-      }),
+      ordersOfRoutes(this.dataSource.manager, idCompany, routeIds, ['client']),
       this.eventRepository.find({
         where: { route_id: In(routeIds), id_company: idCompany },
         order: { occurred_at: 'ASC' },
@@ -682,13 +728,20 @@ export class DriverRoutesService {
 
     const plannedArrival = plannedArrivalsByOrder(histories);
 
-    const eventsByOrder = new Map<number, RouteEvent[]>();
+    // Por rota e pedido: o mesmo pedido pode aparecer em mais de uma rota.
+    const eventsByOrder = new Map<string, RouteEvent[]>();
     for (const event of events) {
       if (!event.order_id) continue;
-      const lista = eventsByOrder.get(event.order_id) ?? [];
+      const chave = `${event.route_id}:${event.order_id}`;
+      const lista = eventsByOrder.get(chave) ?? [];
       lista.push(event);
-      eventsByOrder.set(event.order_id, lista);
+      eventsByOrder.set(chave, lista);
     }
+
+    const previous = await this.previousFailures(
+      orders.filter((order) => order.attempt > 1),
+      idCompany,
+    );
 
     return routes.map((route) => ({
       route_id: route.route_id,
@@ -709,7 +762,11 @@ export class DriverRoutesService {
         : null,
       stops: orders
         .filter((order) => order.route_id === route.route_id)
-        .map((order) => toStopView(order, eventsByOrder.get(order.order_id) ?? [], plannedArrival)),
+        .map((order) => ({
+          ...toStopView(order, eventsByOrder.get(`${order.route_id}:${order.order_id}`) ?? [], plannedArrival),
+          attempt: order.attempt,
+          previous_attempt: previous.get(`${order.route_id}:${order.order_id}`) ?? null,
+        })),
     }));
   }
 }
@@ -718,7 +775,7 @@ function toStopView(
   order: Order,
   events: RouteEvent[],
   plannedArrival: Map<number, string>,
-): DriverStopView {
+): Omit<DriverStopView, 'attempt' | 'previous_attempt'> {
   const arrived = events.find((event) => event.type === 'arrived');
   const final = [...events]
     .reverse()

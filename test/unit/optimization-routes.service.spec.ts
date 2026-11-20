@@ -73,6 +73,13 @@ describe('OptimizationRoutesService', () => {
     create: jest.fn((_entity: unknown, dados: unknown) => dados),
     save: jest.fn().mockResolvedValue({ route_id: 10 }),
     update: jest.fn().mockResolvedValue({ affected: 1 }),
+    // Inserção das paradas (route_stop) de cada rota gravada.
+    createQueryBuilder: jest.fn(() => {
+      const qb: Record<string, jest.Mock> = {};
+      for (const nome of ['insert', 'into', 'values', 'orIgnore']) qb[nome] = jest.fn(() => qb);
+      qb.execute = jest.fn().mockResolvedValue({ identifiers: [] });
+      return qb;
+    }),
   };
 
   beforeEach(async () => {

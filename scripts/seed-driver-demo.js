@@ -63,6 +63,24 @@ function today(timeZone) {
   }).format(new Date());
 }
 
+/**
+ * Cria a parada (tentativa de entrega) de cada pedido da rota em
+ * route_stop, com a situação atual do pedido. Sem isso a rota aparece vazia:
+ * as telas leem as paradas de route_stop.
+ */
+async function syncRouteStops(routeId) {
+  await run(
+    `INSERT INTO route_stop (id_company, route_id, order_id, attempt, stop_sequence, status, completed_at)
+     SELECT o.id_company, o.route_id, o.order_id, 1, o.stop_sequence,
+            CASE WHEN o.status IN ('delivered', 'failed', 'in_route') THEN o.status ELSE 'planned' END,
+            CASE WHEN o.status = 'delivered' THEN o.delivered_at END
+       FROM "order" o
+      WHERE o.route_id = ?
+        AND NOT EXISTS (SELECT 1 FROM route_stop s WHERE s.route_id = o.route_id AND s.order_id = o.order_id)`,
+    [routeId],
+  );
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const email = args.email || DEFAULT_EMAIL;
@@ -168,6 +186,8 @@ async function main() {
       ],
     );
   }
+
+  await syncRouteStops(route.lastID);
 
   console.log(`Empresa ${idCompany} | motorista #${driver.driver_id} ${driver.name}`);
   console.log(`Acesso ao aplicativo: ${email}`);

@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { Driver } from '../../src/shared/entities/driver.entity';
 import { Route } from '../../src/shared/entities/route.entity';
+import { RouteStop } from '../../src/shared/entities/route-stop.entity';
 import { Order } from '../../src/shared/entities/order.entity';
 import { todayInTimeZone } from '../../src/shared/domain/timezone';
 
@@ -62,6 +63,18 @@ export async function seedRoute(
       ),
     );
   }
+
+  // A parada de cada pedido nesta rota (tentativa de entrega).
+  await dataSource.getRepository(RouteStop).save(
+    orders.map((order) => ({
+      id_company: TEST_COMPANY,
+      route_id: route.route_id,
+      order_id: order.order_id,
+      attempt: 1,
+      stop_sequence: order.stop_sequence,
+      status: 'planned' as const,
+    })),
+  );
 
   return { route, orders };
 }

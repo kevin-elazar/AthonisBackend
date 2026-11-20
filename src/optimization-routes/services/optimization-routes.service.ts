@@ -21,6 +21,7 @@ import { CompanyService, RoutingSettings } from '../../modules/company/services/
 import { Route } from '../../shared/entities/route.entity';
 import { AddressCoordinatesService } from './address-coordinates.service';
 import { parseWindowText, todayInTimeZone, zonedTimeToUtc } from '../../shared/domain/timezone';
+import { addRouteStops } from '../../modules/routes/route-stops';
 
 type RoutableStop = { order: any; coordinates: GeocodingResult };
 
@@ -331,6 +332,14 @@ export class OptimizationRoutesService {
           }),
         );
 
+        // Uma tentativa de entrega por pedido nesta rota (route_stop).
+        await addRouteStops(
+          manager,
+          idCompany,
+          salva.route_id,
+          rota.stops.map((stop, indice) => ({ orderId: stop.orderId, sequence: indice + 1 })),
+        );
+
         // A posição da parada vem da ordem devolvida pela otimização: é ela
         // que diz em que sequência o motorista deve entregar.
         for (const [indice, stop] of rota.stops.entries()) {
@@ -384,9 +393,16 @@ export class OptimizationRoutesService {
       return 'Endereço de entrega incompleto (rua, cidade e estado são obrigatórios)';
     }
     // Já está numa rota: roteirizar de novo criaria duas rotas disputando a
-    // mesma entrega, e a segunda sobrescreveria a primeira sem aviso.
-    if (order.route_id) {
+    // mesma entrega. A exceção é o pedido não entregue: a tentativa anterior
+    // fica guardada na rota dela (route_stop) e ele pode ir para uma nova.
+    if (order.route_id && order.status !== 'failed') {
       return 'Pedido já faz parte de uma rota';
+    }
+    if (order.status === 'delivered') {
+      return 'Pedido já foi entregue';
+    }
+    if (order.status === 'cancelled') {
+      return 'Pedido cancelado';
     }
     if (!order.vehicle_id && !order.driver_id) {
       return 'Pedido sem veículo e sem motorista atribuídos';

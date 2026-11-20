@@ -73,6 +73,17 @@ export class OrdersController {
     return this.ordersService.findAll(query);
   }
 
+  @Get(':id/attempts')
+  @ApiOperation({
+    summary: 'Tentativas de entrega do pedido',
+    description:
+      'Cada passagem do pedido por uma rota, da mais antiga à mais recente: rota, dia, motorista, resultado e motivo da ocorrência. Parada devolvida por cancelamento aparece como "returned", sem número de tentativa.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do pedido', type: 'number' })
+  findAttempts(@Param('id') id: string) {
+    return this.ordersService.findAttempts(id);
+  }
+
   @Get(':id')
   @ApiOperation({ 
     summary: 'Buscar pedido por ID',

@@ -13,6 +13,7 @@ import {
 import { OCCURRENCE_TYPES } from '../../shared/domain/enums';
 import { todayInTimeZone } from '../../shared/domain/timezone';
 import { TenantContextService } from '../../shared/tenant/tenant-context.service';
+import { ordersOfRoutes } from '../routes/route-stops';
 import { RouteMetricsService } from './route-metrics.service';
 import { MetricsResult } from './route-metrics.calculator';
 import { FindAnalyticsDto } from './dto/find-analytics.dto';
@@ -197,7 +198,11 @@ export class AnalyticsService {
   /** Tempo de atendimento e atraso por bairro e faixa do dia. */
   async regions(query: FindAnalyticsDto) {
     const data = await this.load(query);
-    const stops = new Map(this.stopExecutions(data).map((stop) => [stop.order_id, stop]));
+    const stops = new Map(
+      [...this.stopExecutionsByRoute(data).entries()].flatMap(([routeId, lista]) =>
+        lista.map((stop) => [`${routeId}:${stop.order_id}`, stop] as const),
+      ),
+    );
 
     const grupos = new Map<
       string,
@@ -205,7 +210,7 @@ export class AnalyticsService {
     >();
 
     for (const order of data.orders) {
-      const stop = stops.get(order.order_id);
+      const stop = stops.get(`${order.route_id}:${order.order_id}`);
       const quando = stop?.completed_at ?? stop?.actual_arrival;
       if (!quando) continue;
 
@@ -236,13 +241,15 @@ export class AnalyticsService {
   /** Frequência por tipo de ocorrência e as ocorrências mais recentes. */
   async occurrences(query: FindAnalyticsDto) {
     const data = await this.load(query);
-    const orders = new Map(data.orders.map((order) => [order.order_id, order]));
+    const orders = new Map(data.orders.map((order) => [`${order.route_id}:${order.order_id}`, order]));
     const routes = new Map(data.routes.map((route) => [route.route_id, route]));
 
     // Uma parada só tem uma ocorrência válida: a do evento que a encerrou.
     const falhas = data.events.filter(
       (event) =>
-        event.type === 'failed' && event.order_id && orders.get(event.order_id)?.status === 'failed',
+        event.type === 'failed' &&
+        event.order_id &&
+        orders.get(`${event.route_id}:${event.order_id}`)?.status === 'failed',
     );
 
     const contagem = new Map<string, number>(OCCURRENCE_TYPES.map((type) => [type, 0]));
@@ -260,7 +267,7 @@ export class AnalyticsService {
         .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
         .slice(0, 20)
         .map((event) => {
-          const order = orders.get(event.order_id as number);
+          const order = orders.get(`${event.route_id}:${event.order_id}`);
           const route = routes.get(event.route_id);
           return {
             route_id: event.route_id,
@@ -331,11 +338,7 @@ export class AnalyticsService {
     }
 
     const [orders, events, pings, company] = await Promise.all([
-      this.orderRepository.find({
-        where: { route_id: routeId, id_company: idCompany },
-        relations: ['client'],
-        order: { stop_sequence: 'ASC' },
-      }),
+      ordersOfRoutes(this.orderRepository.manager, idCompany, [routeId], ['client']),
       this.eventRepository.find({
         where: { route_id: routeId, id_company: idCompany },
         order: { occurred_at: 'ASC' },
@@ -452,11 +455,7 @@ export class AnalyticsService {
 
     const routeIds = routes.map((route) => route.route_id);
     const [orders, lastPings] = await Promise.all([
-      this.orderRepository.find({
-        where: { route_id: In(routeIds), id_company: idCompany },
-        relations: ['client'],
-        order: { stop_sequence: 'ASC' },
-      }),
+      ordersOfRoutes(this.orderRepository.manager, idCompany, routeIds, ['client']),
       // Uma consulta por rota: são poucas rotas em andamento ao mesmo tempo, e
       // "o último ponto de cada grupo" não tem forma portátil entre os bancos.
       Promise.all(
@@ -536,11 +535,7 @@ export class AnalyticsService {
 
     const routeIds = routes.map((route) => route.route_id);
     const [orders, events, storedMetrics] = await Promise.all([
-      this.orderRepository.find({
-        where: { route_id: In(routeIds), id_company: idCompany },
-        relations: ['client'],
-        order: { stop_sequence: 'ASC' },
-      }),
+      ordersOfRoutes(this.orderRepository.manager, idCompany, routeIds, ['client']),
       this.eventRepository.find({
         where: { route_id: In(routeIds), id_company: idCompany },
         order: { occurred_at: 'ASC' },

@@ -14,6 +14,7 @@ import { UpdateQueryBuilder } from 'typeorm';
 import { RouteLocationPing } from '../src/shared/entities/route-location-ping.entity';
 import { RouteMetricsService } from '../src/modules/analytics/route-metrics.service';
 import { RouteExecutionMetrics } from '../src/shared/entities/route-execution-metrics.entity';
+import { AddressCoordinatesService } from '../src/optimization-routes/services/address-coordinates.service';
 
 /**
  * Um dia de rota, do começo ao fim, do jeito que o aplicativo faz — inclusive
@@ -112,6 +113,100 @@ describe('Execução da rota pelo aplicativo (e2e)', () => {
       [route.route_id],
     );
     expect(metricas[0]).toMatchObject({ stops_delivered: 2, stops_failed: 1, actual_duration_min: 70 });
+  });
+
+  describe('nova tentativa de entrega', () => {
+    it('pedido não entregue vai para outra rota sem apagar a tentativa anterior', async () => {
+      const admin = (method: 'get' | 'post' | 'patch', path: string) =>
+        http()[method](path).set('Authorization', `Bearer ${adminToken}`);
+
+      const { route, orders, base } = await novaRota(2);
+      const [entregue, falhou] = orders.map((order) => order.order_id);
+      const veiculo = await admin('post', '/vehicles')
+        .send({ name: 'Van tentativas', plate: 'TNT1A23' })
+        .expect(201);
+      for (const id of [entregue, falhou]) {
+        await admin('patch', `/orders/${id}`).send({ vehicle_id: veiculo.body.vehicle_id }).expect(200);
+      }
+
+      await post(`${base}/start`, evento(0)).expect(200);
+      await post(`${base}/stops/${entregue}/deliver`, evento(10)).expect(200);
+      await post(
+        `${base}/stops/${falhou}/fail`,
+        evento(20, { occurrence_type: 'customer_absent', notes: 'Ninguém atendeu' }),
+      ).expect(200);
+      await post(`${base}/finish`, evento(30)).expect(200);
+
+      // A coordenada gravada pela seed vale para o endereço: sem isso a
+      // otimização tentaria o geocoding, que nos testes usa uma chave falsa.
+      const falhouAntes = await dataSource.getRepository(Order).findOneByOrFail({ order_id: falhou });
+      await dataSource.getRepository(Order).update(
+        { order_id: falhou },
+        {
+          delivery_geocoded_address:
+            app.get(AddressCoordinatesService).keyFor({
+              street: falhouAntes.delivery_street,
+              number: falhouAntes.delivery_number,
+              district: falhouAntes.delivery_district,
+              city: falhouAntes.delivery_city,
+              state: falhouAntes.delivery_state,
+              zipCode: falhouAntes.delivery_zipcode,
+            }) ?? undefined,
+        },
+      );
+
+      // O entregue não volta; o não entregue entra numa rota nova.
+      await admin('post', '/optimization-routes/optimize').send({ orderIds: [entregue] }).expect(400);
+
+      const otimizacao = await admin('post', '/optimization-routes/optimize')
+        .send({ orderIds: [falhou] })
+        .expect(201);
+      expect(otimizacao.body).toMatchObject({ totalRoutes: 1, unassignedOrders: [] });
+      const pedido = await dataSource.getRepository(Order).findOneBy({ order_id: falhou });
+      const novaRotaId = pedido!.route_id!;
+      expect(novaRotaId).not.toBe(route.route_id);
+      expect(pedido!.status).toBe('planned');
+
+      // A rota antiga continua com a parada, como não entregue.
+      const antiga = await admin('get', `/routes/${route.route_id}`).expect(200);
+      expect(
+        antiga.body.orders.map((o: { order_id: number; status: string }) => [o.order_id, o.status]),
+      ).toEqual([
+        [entregue, 'delivered'],
+        [falhou, 'failed'],
+      ]);
+
+      // O histórico do pedido mostra as duas tentativas.
+      const tentativas = await admin('get', `/orders/${falhou}/attempts`).expect(200);
+      expect(tentativas.body).toEqual([
+        expect.objectContaining({
+          attempt: 1,
+          route_id: route.route_id,
+          status: 'failed',
+          occurrence_type: 'customer_absent',
+          notes: 'Ninguém atendeu',
+          completed_at: em(20),
+        }),
+        expect.objectContaining({ attempt: 2, route_id: novaRotaId, status: 'planned' }),
+      ]);
+
+      const lista = await admin('get', '/orders?limit=100').expect(200);
+      expect(lista.body.items.find((o: { order_id: number }) => o.order_id === falhou)).toMatchObject({
+        attempts: 2,
+        last_failure: { route_id: route.route_id, occurrence_type: 'customer_absent' },
+      });
+
+      // No aplicativo, a parada da rota nova avisa o que houve na anterior.
+      const noApp = await http()
+        .get(`/driver/routes/${novaRotaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(noApp.body.stops[0]).toMatchObject({
+        order_id: falhou,
+        attempt: 2,
+        previous_attempt: { route_id: route.route_id, occurrence_type: 'customer_absent' },
+      });
+    });
   });
 
   it('não encerra a rota com parada sem baixa, e diz quais faltam', async () => {
