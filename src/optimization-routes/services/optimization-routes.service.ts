@@ -674,7 +674,9 @@ export class OptimizationRoutesService {
    * hoje.
    */
   private buildGlobalTimeWindow(routable: RoutableStop[], settings: RoutingSettings) {
-    const hoje = new Date().toISOString().slice(0, 10);
+    // "Hoje" no fuso da empresa: em UTC, depois das 21h no Brasil já é o dia
+    // seguinte, e a rota de hoje saía com horários previstos para amanhã.
+    const hoje = todayInTimeZone(settings.timezone);
     const datas = routable
       .map((stop) => stop.order.delivery_date)
       .filter((data): data is string => !!data);

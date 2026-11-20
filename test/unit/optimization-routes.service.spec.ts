@@ -409,6 +409,17 @@ describe('OptimizationRoutesService', () => {
       expect(modelo.globalEndTime.seconds).toBe(Date.parse('2026-09-15T21:00:00.000Z') / 1000);
     });
 
+    it('pedido sem data usa o dia de hoje no fuso da empresa, mesmo depois das 21h', () => {
+      // 23:30 de 19/11 em Brasília, já 20/11 em UTC.
+      jest.useFakeTimers().setSystemTime(new Date('2026-11-20T02:30:00Z'));
+      try {
+        const modelo = (service as any).buildOptimizationModel([stopCom({ delivery_date: null })], settings);
+        expect(modelo.globalStartTime.seconds).toBe(Date.parse('2026-11-19T11:00:00.000Z') / 1000);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('cobre do primeiro ao último dia quando o grupo tem datas diferentes', () => {
       const routable = [
         stopCom({ delivery_date: '2026-09-16' }),

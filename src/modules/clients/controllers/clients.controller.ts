@@ -50,8 +50,10 @@ export class ClientsController {
   })
   @ApiResponse({ status: 400, description: "Dados inválidos ou duplicados" })
   async create(@Body() createClientDto: CreateClientDto) {
-    const result = await this.clientsService.create(createClientDto);
-    return { success: true, data: result };
+    // O cliente criado, direto, como nas outras rotas de cadastro. Antes vinha
+    // embrulhado em { success, data }: o painel e o script de demonstração
+    // liam o client_id no lugar errado e o cliente novo ficava sem id.
+    return this.clientsService.create(createClientDto);
   }
 
   @Get()
