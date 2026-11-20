@@ -20,7 +20,8 @@ import { config } from '../../config/env.config';
 import { CompanyService, RoutingSettings } from '../../modules/company/services/company.service';
 import { Route } from '../../shared/entities/route.entity';
 import { AddressCoordinatesService } from './address-coordinates.service';
-import { parseWindowText, zonedTimeToUtc } from '../../shared/domain/timezone';
+import { parseWindowText, todayInTimeZone, zonedTimeToUtc } from '../../shared/domain/timezone';
+import { addRouteStops } from '../../modules/routes/route-stops';
 
 type RoutableStop = { order: any; coordinates: GeocodingResult };
 
@@ -96,7 +97,7 @@ export class OptimizationRoutesService {
     }
   }
 
-  async optimizeRoutes(orderIds: number[]): Promise<OptimizationResultDto> {
+  async optimizeRoutes(orderIds: number[], plannedDate?: string): Promise<OptimizationResultDto> {
     const startTime = Date.now();
     let googleApiResponse: any = null;
     // A execução já rendeu um registro de auditoria: um segundo registro, de
@@ -123,6 +124,17 @@ export class OptimizationRoutesService {
       // Depósito, custos e tempo de parada vêm do cadastro da empresa.
       const settings = await this.companyService.getRoutingSettings();
 
+      if (plannedDate && plannedDate < todayInTimeZone(settings.timezone)) {
+        throw new HttpException(
+          {
+            success: false,
+            message: 'O dia da rota não pode ser anterior a hoje',
+            unassignedOrders,
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
       if (settings.usingFallbackDepot) {
         this.logger.warn(
           'Empresa sem depósito cadastrado: as rotas partem do ponto padrão em São Paulo.',
@@ -130,7 +142,12 @@ export class OptimizationRoutesService {
       }
 
       const orders = await this.getOrdersWithDetails(validation.validOrders);
-      const groupedOrders = this.groupOrdersByVehicleAndDriver(orders);
+      // Dia escolhido: vale para todos os pedidos, inclusive para as janelas
+      // de horário que vão ao otimizador.
+      if (plannedDate) {
+        for (const order of orders) order.delivery_date = plannedDate;
+      }
+      const groupedOrders = groupOrdersForRoutes(orders, settings.timezone);
 
       const { routes, apiResponses } = await this.buildRoutesForGroups(
         groupedOrders,
@@ -182,7 +199,7 @@ export class OptimizationRoutesService {
 
         // A rota vira registro próprio aqui. O histórico é auditoria da
         // chamada à API; é esta parte que a operação manipula depois.
-        await this.persistRoutes(routes, historico.id);
+        await this.persistRoutes(routes, historico.id, settings.timezone, plannedDate);
       } catch (persistError) {
         this.logger.error('Erro ao gravar as rotas geradas:', persistError);
 
@@ -274,7 +291,12 @@ export class OptimizationRoutesService {
    * pedaço do JSON do histórico, e não haveria como responder "em que rota
    * está este pedido", iniciar a rota ou apagar uma sem apagar as irmãs.
    */
-  private async persistRoutes(routes: OptimizedRoute[], historyId: number): Promise<void> {
+  private async persistRoutes(
+    routes: OptimizedRoute[],
+    historyId: number,
+    timezone: string,
+    plannedDate?: string,
+  ): Promise<void> {
     if (routes.length === 0) return;
 
     const idCompany = this.tenantContext.getIdCompany();
@@ -299,13 +321,23 @@ export class OptimizationRoutesService {
             driver_id: rota.driverId ?? undefined,
             vehicle_id: rota.vehicleId ?? undefined,
             status: 'planned' as const,
-            planned_date: primeiro?.delivery_date,
+            planned_date: (rota.plannedDate ??
+              plannedDate ??
+              plannedDateFor(pedidos, timezone)) as unknown as Date,
             total_distance_m: Math.round(rota.totalDistance ?? 0),
             total_duration_min: Math.round(rota.totalDuration ?? 0),
             simulated: rota.mode === 'simulated',
             region: primeiro?.delivery_city,
             created_by: autor,
           }),
+        );
+
+        // Uma tentativa de entrega por pedido nesta rota (route_stop).
+        await addRouteStops(
+          manager,
+          idCompany,
+          salva.route_id,
+          rota.stops.map((stop, indice) => ({ orderId: stop.orderId, sequence: indice + 1 })),
         );
 
         // A posição da parada vem da ordem devolvida pela otimização: é ela
@@ -316,6 +348,7 @@ export class OptimizationRoutesService {
           // Guardamos junto o endereço que gerou a coordenada: se o endereço
           // for editado depois, a chave deixa de bater e a coordenada é
           // resolvida de novo em vez de continuar apontando para o lugar antigo.
+          const geocodingReal = this.geocodingService.isConfigured();
           const chave = pedido
             ? this.addressCoordinates.keyFor({
                 street: pedido.delivery_street,
@@ -336,7 +369,11 @@ export class OptimizationRoutesService {
               status: 'planned',
               delivery_latitude: stop.coordinates?.latitude,
               delivery_longitude: stop.coordinates?.longitude,
-              delivery_geocoded_address: chave ?? undefined,
+              // Sem geocoding real a coordenada é estimada: sem a chave, o
+              // pedido é localizado de novo quando o Google for configurado.
+              delivery_geocoded_address: geocodingReal ? (chave ?? undefined) : null,
+              // O dia escolhido no "Gerar rota" passa a ser a data de entrega.
+              ...(plannedDate ? { delivery_date: plannedDate as unknown as Date } : {}),
               updated_by: autor,
             },
           );
@@ -356,9 +393,16 @@ export class OptimizationRoutesService {
       return 'Endereço de entrega incompleto (rua, cidade e estado são obrigatórios)';
     }
     // Já está numa rota: roteirizar de novo criaria duas rotas disputando a
-    // mesma entrega, e a segunda sobrescreveria a primeira sem aviso.
-    if (order.route_id) {
+    // mesma entrega. A exceção é o pedido não entregue: a tentativa anterior
+    // fica guardada na rota dela (route_stop) e ele pode ir para uma nova.
+    if (order.route_id && order.status !== 'failed') {
       return 'Pedido já faz parte de uma rota';
+    }
+    if (order.status === 'delivered') {
+      return 'Pedido já foi entregue';
+    }
+    if (order.status === 'cancelled') {
+      return 'Pedido cancelado';
     }
     if (!order.vehicle_id && !order.driver_id) {
       return 'Pedido sem veículo e sem motorista atribuídos';
@@ -384,20 +428,6 @@ export class OptimizationRoutesService {
       .getMany();
   }
 
-  private groupOrdersByVehicleAndDriver(orders: any[]): Map<string, any[]> {
-    const grouped = new Map<string, any[]>();
-
-    orders.forEach((order) => {
-      const key = `${order.vehicle_id}-${order.driver_id}`;
-      if (!grouped.has(key)) {
-        grouped.set(key, []);
-      }
-      grouped.get(key).push(order);
-    });
-
-    return grouped;
-  }
-
   private async buildRoutesForGroups(
     groupedOrders: Map<string, any[]>,
     unassignedOrders: UnassignedOrderDto[],
@@ -414,6 +444,7 @@ export class OptimizationRoutesService {
           settings,
         );
         if (route) {
+          route.plannedDate = plannedDateFor(orders, settings.timezone);
           routes.push(route);
           if (apiResponse) {
             apiResponses.push(apiResponse);
@@ -550,7 +581,7 @@ export class OptimizationRoutesService {
           this.buildOptimizationModel(routable, settings),
         );
         return {
-          route: this.processGoogleMapsResponse(apiResponse, routable, settings),
+          route: this.processGoogleMapsResponse(apiResponse, routable, settings, unassignedOrders),
           apiResponse,
         };
       } catch (error) {
@@ -643,7 +674,9 @@ export class OptimizationRoutesService {
    * hoje.
    */
   private buildGlobalTimeWindow(routable: RoutableStop[], settings: RoutingSettings) {
-    const hoje = new Date().toISOString().slice(0, 10);
+    // "Hoje" no fuso da empresa: em UTC, depois das 21h no Brasil já é o dia
+    // seguinte, e a rota de hoje saía com horários previstos para amanhã.
+    const hoje = todayInTimeZone(settings.timezone);
     const datas = routable
       .map((stop) => stop.order.delivery_date)
       .filter((data): data is string => !!data);
@@ -664,8 +697,21 @@ export class OptimizationRoutesService {
     response: any,
     routable: RoutableStop[],
     settings: RoutingSettings,
+    unassignedOrders: UnassignedOrderDto[] = [],
   ): OptimizedRoute {
     const optimizationResult = response[0];
+
+    // O Google pode deixar entregas de fora (skippedShipments). Antes elas
+    // sumiam: o pedido continuava pendente e ninguém sabia por quê.
+    for (const pulado of optimizationResult?.skippedShipments ?? []) {
+      const entry = routable[Number(pulado.index ?? 0)];
+      if (!entry) continue;
+      const codigos: string[] = (pulado.reasons ?? []).map((reason: any) => String(reason.code));
+      unassignedOrders.push({
+        orderId: entry.order.order_id,
+        reason: describeSkipReason(codigos),
+      });
+    }
 
     if (
       !optimizationResult ||
@@ -795,3 +841,60 @@ export class OptimizationRoutesService {
     ).toISOString();
   }
 }
+
+/** Motivo, em português, de uma entrega que o Google deixou fora da rota. */
+export function describeSkipReason(codes: string[]): string {
+  const textos: Record<string, string> = {
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TIME_WINDOWS:
+      'não cabe no expediente (horário de operação e tempo por parada da empresa) ou o endereço está longe demais',
+    DEMAND_EXCEEDS_VEHICLE_CAPACITY: 'a quantidade excede a capacidade do veículo',
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_DISTANCE_LIMIT: 'passa do limite de distância do veículo',
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_DURATION_LIMIT: 'passa do limite de duração da rota',
+    CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TRAVEL_DURATION_LIMIT: 'passa do limite de tempo de viagem',
+    VEHICLE_NOT_ALLOWED: 'o veículo não pode atender este pedido',
+    NO_VEHICLE: 'nenhum veículo disponível para o pedido',
+  };
+  const motivos = [...new Set(codes.map((code) => textos[code] ?? code))].filter(Boolean);
+  return motivos.length
+    ? `Fora da rota otimizada: ${motivos.join('; ')}`
+    : 'Fora da rota otimizada pelo Google (sem motivo informado)';
+}
+
+/**
+ * Separa os pedidos em rotas: uma por veículo + motorista + dia de entrega.
+ *
+ * Antes o dia não entrava na chave: pedidos de 19 e 20 com o mesmo motorista
+ * viravam uma rota só, com um expediente de dois dias, e o otimizador podia
+ * espalhar as paradas pelos dois. Pedido sem data vai para hoje.
+ */
+export function groupOrdersForRoutes<
+  T extends { vehicle_id?: number | null; driver_id?: number | null; delivery_date?: string | Date | null },
+>(orders: T[], timezone: string, agora: Date = new Date()): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const order of orders) {
+    const dia = plannedDateFor([order], timezone, agora);
+    const key = `${order.vehicle_id}-${order.driver_id}-${dia}`;
+    const grupo = grouped.get(key);
+    if (grupo) grupo.push(order);
+    else grouped.set(key, [order]);
+  }
+  return grouped;
+}
+
+/**
+ * Dia planejado da rota: a data de entrega mais cedo entre os pedidos, ou hoje
+ * no fuso da empresa quando nenhum tem data. Sem isso a rota ficava sem dia e
+ * sumia dos indicadores e dos percursos, que filtram por período.
+ */
+export function plannedDateFor(
+  pedidos: Array<{ delivery_date?: string | Date | null }>,
+  timezone: string,
+  agora: Date = new Date(),
+): string {
+  const datas = pedidos
+    .map((pedido) => (pedido.delivery_date ? String(pedido.delivery_date).slice(0, 10) : null))
+    .filter((data): data is string => !!data && /^\d{4}-\d{2}-\d{2}$/.test(data))
+    .sort((a, b) => a.localeCompare(b));
+  return datas[0] ?? todayInTimeZone(timezone, agora);
+}
+

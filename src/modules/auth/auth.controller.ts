@@ -21,6 +21,20 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
 import { Public } from './decorators/public.decorator';
+import { AllowDriver } from './decorators/allow-driver.decorator';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { Throttle } from '@nestjs/throttler';
+
+/**
+ * Limite próprio do login, mais apertado que o global: dificulta tentativa de
+ * senha por força bruta a partir de um mesmo IP. Os nomes batem com os
+ * throttlers de app.module.ts.
+ */
+const LOGIN_THROTTLE = {
+  short: { ttl: 1000, limit: 3 },
+  medium: { ttl: 10000, limit: 10 },
+  long: { ttl: 60000, limit: 20 },
+};
 
 @ApiTags('Autenticação')
 @Controller('auth')
@@ -50,6 +64,7 @@ export class AuthController {
 
   @Post('login')
   @Public()
+  @Throttle(LOGIN_THROTTLE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Fazer login' })
   @ApiResponse({ 
@@ -62,7 +77,35 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Post('refresh')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Renovar a sessão',
+    description:
+      'Troca o refresh token por um novo par de tokens. O refresh token usado deixa de valer.',
+  })
+  @ApiResponse({ status: 200, description: 'Novo par de tokens', type: AuthResponseDto })
+  @ApiResponse({ status: 401, description: 'Refresh token inválido, expirado ou revogado' })
+  async refresh(@Body() dto: RefreshTokenDto): Promise<AuthResponseDto> {
+    return this.authService.refresh(dto.refresh_token);
+  }
+
+  @Post('logout')
+  @Public()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Encerrar a sessão',
+    description:
+      'Revoga o refresh token. É público porque o access token pode já ter expirado quando o usuário decide sair.',
+  })
+  @ApiResponse({ status: 204, description: 'Sessão encerrada' })
+  async logout(@Body() dto: RefreshTokenDto): Promise<void> {
+    await this.authService.logout(dto.refresh_token);
+  }
+
   @Get('profile')
+  @AllowDriver()
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Obter perfil do usuário autenticado' })
   @ApiResponse({ 

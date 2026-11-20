@@ -58,6 +58,9 @@ export class OptimizedRoute {
   @ApiProperty({ description: 'Paradas da rota', type: [RouteStop] })
   stops: RouteStop[];
 
+  @ApiProperty({ description: 'Dia da entrega (AAAA-MM-DD)', example: '2026-11-20', required: false })
+  plannedDate?: string;
+
   @ApiProperty({ description: 'Localização de início', example: { latitude: -23.5505, longitude: -46.6333 } })
   startLocation: {
     latitude: number;

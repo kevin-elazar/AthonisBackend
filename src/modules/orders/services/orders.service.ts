@@ -1,6 +1,7 @@
+import { containsInsensitive } from '../../../database/column-types';
 import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindOptionsWhere } from 'typeorm';
+import { Repository, FindOptionsWhere } from 'typeorm';
 import { Order } from '../../../shared/entities/order.entity';
 import { Client } from '../../../shared/entities/client.entity';
 import { Vehicle } from '../../../shared/entities/vehicle.entity';
@@ -9,6 +10,7 @@ import { CreateOrderDto } from '../dto/create-order.dto';
 import { UpdateOrderDto } from '../dto/update-order.dto';
 import { FindOrderDto } from '../dto/find-order.dto';
 import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
+import { attemptSummaries, orderAttempts } from '../../routes/route-stops';
 
 @Injectable()
 export class OrdersService {
@@ -110,8 +112,19 @@ export class OrdersService {
         take: limit
       });
   
+      // Quantas vezes cada pedido já foi para a rua e o que deu errado na última.
+      const tentativas = await attemptSummaries(
+        this.orderRepository.manager,
+        where.id_company as number,
+        items.map((item) => item.order_id),
+      );
+
       return {
-        items,
+        items: items.map((item) => ({
+          ...item,
+          attempts: tentativas.get(item.order_id)?.attempts ?? 0,
+          last_failure: tentativas.get(item.order_id)?.last_failure ?? null,
+        })),
         meta: {
           total,
           page: Number(page),
@@ -131,7 +144,7 @@ export class OrdersService {
     const where: FindOptionsWhere<Order> = {};
 
     if (title) {
-      where.title = Like(`%${title.trim()}%`);
+      where.title = containsInsensitive(title.trim());
     }
 
     if (urgency) {
@@ -159,6 +172,12 @@ export class OrdersService {
       throw new NotFoundException(`Order ID ${id} not found`);
     }
     return order;
+  }
+
+  /** Tentativas de entrega do pedido: cada passagem por uma rota e o resultado. */
+  async findAttempts(id: string) {
+    const order = await this.findOne(id);
+    return orderAttempts(this.orderRepository.manager, order.id_company, order.order_id);
   }
 
   async update(id: string, updateOrderDto: UpdateOrderDto) {

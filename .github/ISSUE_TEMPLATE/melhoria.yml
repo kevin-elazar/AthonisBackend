@@ -1,0 +1,19 @@
+name: Melhoria
+description: Sugestão de funcionalidade ou ajuste
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema ou necessidade
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: Proposta
+  - type: input
+    id: origem
+    attributes:
+      label: Origem
+      description: Ex.: feedback da Forte, revisão do squad, piloto.

@@ -73,6 +73,13 @@ describe('OptimizationRoutesService', () => {
     create: jest.fn((_entity: unknown, dados: unknown) => dados),
     save: jest.fn().mockResolvedValue({ route_id: 10 }),
     update: jest.fn().mockResolvedValue({ affected: 1 }),
+    // Inserção das paradas (route_stop) de cada rota gravada.
+    createQueryBuilder: jest.fn(() => {
+      const qb: Record<string, jest.Mock> = {};
+      for (const nome of ['insert', 'into', 'values', 'orIgnore']) qb[nome] = jest.fn(() => qb);
+      qb.execute = jest.fn().mockResolvedValue({ identifiers: [] });
+      return qb;
+    }),
   };
 
   beforeEach(async () => {
@@ -283,6 +290,58 @@ describe('OptimizationRoutesService', () => {
       expect(result.routes[0].stops).toHaveLength(1);
       expect(historyService.create).toHaveBeenCalled();
     });
+
+    it('pedidos de dias diferentes do mesmo motorista viram uma rota por dia', async () => {
+      const qb = orderRepository.createQueryBuilder() as unknown as { getMany: jest.Mock };
+      qb.getMany.mockResolvedValueOnce([
+        { ...mockOrderValid, order_id: 1, delivery_date: '2099-11-19' },
+        { ...mockOrderValid, order_id: 4, delivery_date: '2099-11-20' },
+        { ...mockOrderValid, order_id: 5, delivery_date: '2099-11-19' },
+      ]);
+      jest.spyOn(orderRepository, 'find').mockResolvedValue([
+        { ...mockOrderValid, order_id: 1 },
+        { ...mockOrderValid, order_id: 4 },
+        { ...mockOrderValid, order_id: 5 },
+      ] as Order[]);
+
+      const result = await service.optimizeRoutes([1, 4, 5]);
+
+      expect(result.totalRoutes).toBe(2);
+      const porDia = Object.fromEntries(
+        result.routes.map((rota) => [rota.plannedDate, rota.stops.map((stop) => stop.orderId).sort()]),
+      );
+      expect(porDia).toEqual({ '2099-11-19': [1, 5], '2099-11-20': [4] });
+      const gravadas = mockManager.create.mock.calls.map(([, dados]) => (dados as any).planned_date);
+      expect(gravadas.sort()).toEqual(['2099-11-19', '2099-11-20']);
+    });
+
+    it('com o dia escolhido, tudo vai para uma rota nesse dia e a data dos pedidos muda', async () => {
+      const qb = orderRepository.createQueryBuilder() as unknown as { getMany: jest.Mock };
+      qb.getMany.mockResolvedValueOnce([
+        { ...mockOrderValid, order_id: 1, delivery_date: '2099-11-19' },
+        { ...mockOrderValid, order_id: 4, delivery_date: '2099-11-20' },
+      ]);
+      jest.spyOn(orderRepository, 'find').mockResolvedValue([
+        { ...mockOrderValid, order_id: 1 },
+        { ...mockOrderValid, order_id: 4 },
+      ] as Order[]);
+
+      const result = await service.optimizeRoutes([1, 4], '2099-12-01');
+
+      expect(result.totalRoutes).toBe(1);
+      expect(result.routes[0].plannedDate).toBe('2099-12-01');
+      expect((mockManager.create.mock.calls[0][1] as any).planned_date).toBe('2099-12-01');
+      for (const [, , dados] of mockManager.update.mock.calls) {
+        expect(dados).toMatchObject({ delivery_date: '2099-12-01' });
+      }
+    });
+
+    it('recusa dia escolhido no passado', async () => {
+      jest.spyOn(orderRepository, 'find').mockResolvedValue([mockOrderValid] as Order[]);
+      await expect(service.optimizeRoutes([1], '2020-01-01')).rejects.toThrow(
+        'O dia da rota não pode ser anterior a hoje',
+      );
+    });
   });
 
   /**
@@ -348,6 +407,17 @@ describe('OptimizationRoutesService', () => {
 
       expect(modelo.globalStartTime.seconds).toBe(Date.parse('2026-09-15T11:00:00.000Z') / 1000);
       expect(modelo.globalEndTime.seconds).toBe(Date.parse('2026-09-15T21:00:00.000Z') / 1000);
+    });
+
+    it('pedido sem data usa o dia de hoje no fuso da empresa, mesmo depois das 21h', () => {
+      // 23:30 de 19/11 em Brasília, já 20/11 em UTC.
+      jest.useFakeTimers().setSystemTime(new Date('2026-11-20T02:30:00Z'));
+      try {
+        const modelo = (service as any).buildOptimizationModel([stopCom({ delivery_date: null })], settings);
+        expect(modelo.globalStartTime.seconds).toBe(Date.parse('2026-11-19T11:00:00.000Z') / 1000);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('cobre do primeiro ao último dia quando o grupo tem datas diferentes', () => {
@@ -420,6 +490,86 @@ describe('OptimizationRoutesService', () => {
       // Perto de agora, não décadas de distância — é a estimativa local, não
       // um instante do Google mal interpretado.
       expect(chegada - antes).toBeLessThan(24 * 60 * 60 * 1000);
+    });
+      it('pedido que o Google deixa de fora volta com o motivo, em vez de sumir', () => {
+      const dois = [
+        ...routable,
+        { order: { ...mockOrderValid, order_id: 99 }, coordinates: { latitude: -26.5, longitude: -49.1 } },
+      ];
+      const respostaGoogle = [
+        {
+          routes: [
+            {
+              visits: [{ shipmentIndex: 0, isPickup: false }],
+              metrics: { travelDistanceMeters: 5000, totalDuration: { seconds: 600 } },
+            },
+          ],
+          skippedShipments: [
+            { index: 1, reasons: [{ code: 'CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TIME_WINDOWS' }] },
+          ],
+        },
+      ];
+      const fora: { orderId: number; reason: string }[] = [];
+
+      const rota = (service as any).processGoogleMapsResponse(respostaGoogle, dois, settings, fora);
+
+      expect(rota.stops).toHaveLength(1);
+      expect(fora).toEqual([
+        { orderId: 99, reason: expect.stringContaining('não cabe no expediente') },
+      ]);
+    });
+  });
+});
+
+
+describe('describeSkipReason', () => {
+  const { describeSkipReason } = jest.requireActual('@/optimization-routes/services/optimization-routes.service');
+  it.each([
+    [['DEMAND_EXCEEDS_VEHICLE_CAPACITY'], 'capacidade do veículo'],
+    [['CODIGO_NOVO'], 'CODIGO_NOVO'],
+    [[], 'sem motivo informado'],
+  ])('%j → %s', (codes, trecho) => {
+    expect(describeSkipReason(codes)).toContain(trecho);
+  });
+});
+
+describe('plannedDateFor', () => {
+  const { plannedDateFor } = jest.requireActual('@/optimization-routes/services/optimization-routes.service');
+  const agora = new Date('2026-11-19T02:30:00Z'); // 23:30 de 18/11 em Brasília
+
+  it('usa a data de entrega mais cedo dos pedidos', () => {
+    expect(
+      plannedDateFor([{ delivery_date: '2026-11-21' }, { delivery_date: '2026-11-20' }, {}], 'America/Sao_Paulo', agora),
+    ).toBe('2026-11-20');
+  });
+
+  it('sem data nos pedidos, vale hoje no fuso da empresa', () => {
+    expect(plannedDateFor([{}, { delivery_date: null }], 'America/Sao_Paulo', agora)).toBe('2026-11-18');
+  });
+});
+
+describe('groupOrdersForRoutes', () => {
+  const { groupOrdersForRoutes } = jest.requireActual('@/optimization-routes/services/optimization-routes.service');
+  const agora = new Date('2026-11-19T12:00:00Z');
+
+  it('separa por veículo, motorista e dia; pedido sem data vai para hoje', () => {
+    const grupos = groupOrdersForRoutes(
+      [
+        { order_id: 1, vehicle_id: 1, driver_id: 1, delivery_date: '2026-11-19' },
+        { order_id: 2, vehicle_id: 1, driver_id: 1, delivery_date: '2026-11-20' },
+        { order_id: 3, vehicle_id: 1, driver_id: 1 },
+        { order_id: 4, vehicle_id: 2, driver_id: 2, delivery_date: '2026-11-19' },
+      ],
+      'America/Sao_Paulo',
+      agora,
+    );
+    const resumo = Object.fromEntries(
+      [...grupos].map(([chave, pedidos]: [string, any[]]) => [chave, pedidos.map((p) => p.order_id)]),
+    );
+    expect(resumo).toEqual({
+      '1-1-2026-11-19': [1, 3],
+      '1-1-2026-11-20': [2],
+      '2-2-2026-11-19': [4],
     });
   });
 });

@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from '../../database/column-types';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -32,22 +33,30 @@ export class User {
   @Column({ type: 'int' })
   id_company: number;
 
+  /**
+   * Motorista a que este login pertence. Só é preenchido para o papel
+   * 'driver': é por aqui que o aplicativo descobre de quem são as rotas, sem
+   * que o aparelho precise (ou possa) informar isso.
+   */
+  @Column({ type: 'int', nullable: true })
+  driver_id?: number | null;
+
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   created_by?: string;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updated_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   updated_by?: string;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: DATETIME_TYPE, nullable: true })
   last_login?: Date;
 }
 

@@ -37,7 +37,10 @@ export class OptimizationRoutesController {
       this.logger.log(`Iniciando otimização para ${optimizeRoutesDto.orderIds.length} pedidos: ${optimizeRoutesDto.orderIds.join(', ')}`);
       
       const startTime = Date.now();
-      const result = await this.optimizationRoutesService.optimizeRoutes(optimizeRoutesDto.orderIds);
+      const result = await this.optimizationRoutesService.optimizeRoutes(
+        optimizeRoutesDto.orderIds,
+        optimizeRoutesDto.plannedDate,
+      );
       const endTime = Date.now();
       
       result.optimizationTime = endTime - startTime;

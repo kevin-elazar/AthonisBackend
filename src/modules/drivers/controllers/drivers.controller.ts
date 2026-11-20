@@ -29,7 +29,6 @@ export class DriversController {
   })
   @ApiResponse({ status: 400, description: 'Dados inválidos' })
   create(@Body() createDriverDto: CreateDriverDto) {
-    console.log("post --------------------------");
     return this.driversService.create(createDriverDto);
   }
 

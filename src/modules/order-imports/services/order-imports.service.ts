@@ -26,6 +26,7 @@ import { ImportResultDto, OrderSuccessDto, OrderFailureDto } from '../dto/import
 import { RejectedFileListDto, RejectedFileDto } from '../dto/rejected-file-list.dto';
 import { FindRejectedFilesDto } from '../dto/find-rejected-files.dto';
 import { config } from '../../../config/env.config';
+import { buildTemplateCsv, normalizeUrgency, pickDriverVehiclePairs } from '../import-template';
 
 type TenantReferenceIds = {
   clientIds: Set<number>;
@@ -152,7 +153,7 @@ export class OrderImportsService {
         let headerChecked = false;
 
         createReadStream(filePath)
-          .pipe(csvParser({ separator: delimiter }))
+          .pipe(csvParser({ separator: delimiter, mapHeaders: ({ header }) => header.replace(/^\uFEFF/, '').trim() }))
           .on('headers', (headers: string[]) => {
             headerChecked = true;
             // Normalizar headers removendo espaços em branco
@@ -167,6 +168,9 @@ export class OrderImportsService {
               resolve(true);
             }
           })
+          // Sem consumidor de 'data' o stream fica pausado e 'end' nunca
+          // dispara: um arquivo vazio deixava a requisição pendurada.
+          .on('data', () => undefined)
           .on('error', (error) => {
             reject(new BadRequestException(`Erro ao ler CSV: ${error.message}`));
           })
@@ -259,11 +263,11 @@ export class OrderImportsService {
 
     return new Promise((resolve, reject) => {
       const rows: any[] = [];
-      let processing = false;
+      const processing = false;
       let ended = false;
 
       const stream = createReadStream(filePath)
-        .pipe(csvParser({ separator: delimiter }))
+        .pipe(csvParser({ separator: delimiter, mapHeaders: ({ header }) => header.replace(/^\uFEFF/, '').trim() }))
         .on('data', (row) => {
           // Coletar todas as linhas primeiro
           rows.push(row);
@@ -283,7 +287,7 @@ export class OrderImportsService {
                 title: row.title?.trim() || undefined,
                 description: row.description?.trim() || undefined,
                 invoice_number: row.invoice_number?.trim() || undefined,
-                urgency: row.urgency?.trim() || undefined,
+                urgency: normalizeUrgency(row.urgency) || undefined,
                 vehicle_id: row.vehicle_id ? Number(row.vehicle_id) : undefined,
                 driver_id: row.driver_id ? Number(row.driver_id) : undefined,
                 quantity: row.quantity ? Number(row.quantity) : undefined,
@@ -360,6 +364,27 @@ export class OrderImportsService {
           reject(new InternalServerErrorException('Erro ao processar arquivo CSV'));
         });
     });
+  }
+
+  /**
+   * Planilha modelo com 10 pedidos de demonstração em Jaraguá do Sul, já com
+   * motoristas e veículos desta empresa (até dois pares, para gerar duas rotas).
+   */
+  async buildTemplate(): Promise<string> {
+    const idCompany = this.tenantContext.getIdCompany();
+    const [drivers, vehicles] = await Promise.all([
+      this.driverRepository.find({
+        where: { id_company: idCompany },
+        select: { driver_id: true, status: true },
+      }),
+      this.vehicleRepository.find({
+        where: { id_company: idCompany },
+        select: { vehicle_id: true, status: true, driver_id: true },
+      }),
+    ]);
+
+    const pares = pickDriverVehiclePairs(drivers, vehicles);
+    return buildTemplateCsv(pares, Number(format(new Date(), 'yyMMdd')) * 100);
   }
 
   /**
@@ -531,7 +556,14 @@ export class OrderImportsService {
   async getRejectedFilePath(filename: string): Promise<string> {
     try {
       // Um nome válido é sempre um único componente de caminho.
-      if (!filename || filename !== path.basename(filename) || filename.includes('..')) {
+      // As duas barras são recusadas em qualquer sistema: no Linux (produção)
+      // a contrabarra não separa pastas, e o path.basename não a pegaria.
+      if (
+        !filename ||
+        filename !== path.basename(filename) ||
+        filename.includes('..') ||
+        /[\\/]/.test(filename)
+      ) {
         throw new BadRequestException('Nome de arquivo inválido');
       }
 

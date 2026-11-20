@@ -1,21 +1,52 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import { runInTransaction } from '../../../database/transaction';
 import { Route } from '../../../shared/entities/route.entity';
 import { Order } from '../../../shared/entities/order.entity';
 import { Driver } from '../../../shared/entities/driver.entity';
 import { Vehicle } from '../../../shared/entities/vehicle.entity';
-import { RouteStatus } from '../../../shared/domain/enums';
+import { RouteEvent } from '../../../shared/entities/route-event.entity';
+import { RouteReturnedStop } from '../../../shared/entities/route-returned-stop.entity';
+import { Company } from '../../../shared/entities/company.entity';
+import { todayInTimeZone } from '../../../shared/domain/timezone';
+import { DuplicateRouteDto } from '../dto/duplicate-route.dto';
+import { RouteStop } from '../../../shared/entities/route-stop.entity';
+import { addRouteStops, deleteRouteStops, ordersOfRoutes, syncRouteStops } from '../route-stops';
+import { FINAL_STOP_STATUSES, RouteStatus } from '../../../shared/domain/enums';
 import { TenantContextService } from '../../../shared/tenant/tenant-context.service';
 import { FindRouteDto } from '../dto/find-route.dto';
 
+/**
+ * Uma parada como a tela de rotas a mostra: o pedido, mais o que o
+ * entregador registrou ao encerrá-la no aplicativo.
+ */
+export type RouteStopOrder = Order & {
+  /** Motivo da não entrega. Vazio para o que foi entregue ou ainda está em aberto. */
+  occurrence_type?: string | null;
+  /** Observação escrita pelo entregador na entrega ou na ocorrência. */
+  driver_notes?: string | null;
+  /** Hora, no aparelho, em que a parada foi encerrada. */
+  closed_at?: Date | null;
+};
+
 /** Uma rota com os pedidos já na ordem das paradas. */
-export type RouteWithStops = Route & { orders: Order[] };
+export type RouteWithStops = Route & {
+  orders: RouteStopOrder[];
+  /** Motivo informado pelo entregador ao cancelar a rota pelo aplicativo. */
+  cancel_reason?: string | null;
+  /**
+   * Paradas que a rota cancelada ainda devia e que continuam livres na fila,
+   * prontas para irem para uma rota duplicada. Zero nas outras situações.
+   */
+  returned_stop_count?: number;
+};
 
 @Injectable()
 export class RoutesService {
@@ -30,6 +61,12 @@ export class RoutesService {
     private driverRepository: Repository<Driver>,
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
+    @InjectRepository(RouteEvent)
+    private eventRepository: Repository<RouteEvent>,
+    @InjectRepository(RouteReturnedStop)
+    private returnedStopRepository: Repository<RouteReturnedStop>,
+    @InjectRepository(Company)
+    private companyRepository: Repository<Company>,
     private dataSource: DataSource,
     private tenantContext: TenantContextService,
   ) {}
@@ -75,22 +112,55 @@ export class RoutesService {
     if (routes.length === 0) return [];
 
     const idCompany = this.tenantContext.getIdCompany();
-    const orders = await this.orderRepository.find({
-      where: { route_id: In(routes.map((r) => r.route_id)), id_company: idCompany },
-      relations: ['client'],
-      order: { stop_sequence: 'ASC' },
-    });
+    // As paradas de cada rota vêm das tentativas: um pedido não entregue que
+    // foi para outra rota continua aparecendo aqui, como não entregue.
+    const orders = await ordersOfRoutes(
+      this.dataSource.manager,
+      idCompany,
+      routes.map((r) => r.route_id),
+      ['client'],
+    );
 
-    const porRota = new Map<number, Order[]>();
+    // O que o entregador registrou ao encerrar cada parada. O pedido guarda só
+    // "não entregue"; o motivo e a observação estão no evento.
+    const encerramentos = await this.eventRepository.find({
+      where: {
+        route_id: In(routes.map((r) => r.route_id)),
+        id_company: idCompany,
+        type: In(['delivered', 'failed', 'route_cancelled']),
+      },
+      order: { occurred_at: 'ASC' },
+    });
+    // Por rota e pedido: o mesmo pedido pode ter passado por mais de uma rota.
+    const ultimoPorPedido = new Map<string, RouteEvent>();
+    const motivoCancelamento = new Map<number, string | null>();
+    for (const event of encerramentos) {
+      if (event.type === 'route_cancelled') motivoCancelamento.set(event.route_id, event.notes ?? null);
+      else if (event.order_id) ultimoPorPedido.set(`${event.route_id}:${event.order_id}`, event);
+    }
+
+    const porRota = new Map<number, RouteStopOrder[]>();
     for (const order of orders) {
+      const event = ultimoPorPedido.get(`${order.route_id}:${order.order_id}`);
       const lista = porRota.get(order.route_id) ?? [];
-      lista.push(order);
+      lista.push({
+        ...order,
+        occurrence_type: order.status === 'failed' ? (event?.occurrence_type ?? 'other') : null,
+        driver_notes: event?.notes ?? null,
+        closed_at: event?.occurred_at ?? order.delivered_at ?? null,
+      });
       porRota.set(order.route_id, lista);
     }
+
+    const disponiveis = await this.availableReturnedStops(
+      routes.filter((route) => route.status === 'cancelled').map((route) => route.route_id),
+    );
 
     return routes.map((route) => ({
       ...route,
       orders: porRota.get(route.route_id) ?? [],
+      cancel_reason: motivoCancelamento.get(route.route_id) ?? null,
+      returned_stop_count: disponiveis.filter((stop) => stop.route_id === route.route_id).length,
     })) as RouteWithStops[];
   }
 
@@ -123,6 +193,7 @@ export class RoutesService {
         { route_id: routeId, status: In(['pending', 'planned']) },
         { status: 'in_route', updated_by: this.autor() },
       );
+      await syncRouteStops(manager, routeId);
 
       if (route.driver_id) {
         await manager.update(Driver, { driver_id: route.driver_id }, { status: 'in_route' });
@@ -166,6 +237,7 @@ export class RoutesService {
         { route_id: routeId, status: In(['pending', 'planned', 'in_route']) },
         { status: 'delivered', delivered_at: agora, updated_by: this.autor() },
       );
+      await syncRouteStops(manager, routeId);
 
       await this.liberarRecursos(manager, route);
     });
@@ -188,13 +260,14 @@ export class RoutesService {
     if (!order) {
       throw new NotFoundException(`Pedido ${orderId} não faz parte da rota ${routeId}`);
     }
-    if (order.status === 'delivered') {
+    if (FINAL_STOP_STATUSES.includes(order.status)) {
       throw new BadRequestException('Esta parada já foi baixada');
     }
 
     const agora = new Date();
+    // Parada com ocorrência também está resolvida: o entregador esteve lá.
     const restantes = route.orders.filter(
-      (item) => item.order_id !== orderId && item.status !== 'delivered',
+      (item) => item.order_id !== orderId && !FINAL_STOP_STATUSES.includes(item.status),
     );
 
     await this.dataSource.transaction(async (manager) => {
@@ -203,6 +276,7 @@ export class RoutesService {
         { order_id: orderId, id_company: this.tenantContext.getIdCompany() },
         { status: 'delivered', delivered_at: agora, updated_by: this.autor() },
       );
+      await syncRouteStops(manager, routeId);
 
       // Última parada: a rota terminou, e deixar o motorista "em rota" depois
       // disso é o tipo de estado que trava a escala do dia seguinte.
@@ -237,14 +311,15 @@ export class RoutesService {
     // Entrega concluída é fato registrado. Apagar a rota deixaria esses
     // pedidos apontando para algo que não existe mais, e a entrega perderia
     // o contexto de quando e por qual rota aconteceu.
-    if (route.orders.some((order) => order.status === 'delivered')) {
+    if (route.orders.some((order) => FINAL_STOP_STATUSES.includes(order.status))) {
       throw new BadRequestException(
-        'A rota já tem entregas concluídas e não pode ser excluída. Cancele-a para liberar os pedidos restantes.',
+        'A rota já tem paradas baixadas e não pode ser excluída. Cancele-a para liberar os pedidos restantes.',
       );
     }
 
     await this.dataSource.transaction(async (manager) => {
       await this.devolverPedidos(manager, routeId);
+      await deleteRouteStops(manager, routeId);
       await manager.delete(Route, { route_id: routeId });
     });
   }
@@ -263,11 +338,176 @@ export class RoutesService {
         { route_id: routeId },
         { status: 'cancelled' as RouteStatus, updated_by: this.autor() },
       );
+
+      // Antes de devolver: depois disso o pedido já não aponta para a rota,
+      // e a lista do que ela ainda devia se perderia.
+      const abertas = route.orders.filter((order) => !FINAL_STOP_STATUSES.includes(order.status));
+      if (abertas.length > 0) {
+        await manager.insert(
+          RouteReturnedStop,
+          abertas.map((order) => ({
+            id_company: route.id_company,
+            route_id: routeId,
+            order_id: order.order_id,
+            stop_sequence: order.stop_sequence ?? undefined,
+          })),
+        );
+      }
+
+      // As paradas em aberto viram "devolvidas" (não contam como tentativa).
+      await syncRouteStops(manager, routeId, { returnOpen: true });
       await this.devolverPedidos(manager, routeId);
       await this.liberarRecursos(manager, route);
     });
 
     return this.findOne(routeId);
+  }
+
+  /**
+   * Cria uma rota nova com as paradas que a rota cancelada ainda devia, na
+   * mesma ordem, para a entrega ser feita de novo.
+   *
+   * Entram só os pedidos que continuam livres na fila: o que já foi colocado
+   * em outra rota, entregue ou cancelado nesse meio-tempo fica de fora. A rota
+   * nova não herda a previsão de chegada da otimização (era para outro dia) e
+   * só herda distância e duração se tiver exatamente as mesmas paradas.
+   */
+  async duplicate(routeId: number, dto: DuplicateRouteDto = {}): Promise<RouteWithStops> {
+    const idCompany = this.tenantContext.getIdCompany();
+    const original = await this.routeRepository.findOne({
+      where: { route_id: routeId, id_company: idCompany },
+    });
+    if (!original) {
+      throw new NotFoundException(`Rota ${routeId} não encontrada`);
+    }
+    if (original.status !== 'cancelled') {
+      throw new BadRequestException('Só é possível duplicar uma rota cancelada');
+    }
+
+    const devolvidas = await this.returnedStopRepository.count({
+      where: { route_id: routeId, id_company: idCompany },
+    });
+    const disponiveis = await this.availableReturnedStops([routeId]);
+
+    if (disponiveis.length === 0) {
+      throw new BadRequestException(
+        devolvidas === 0
+          ? 'Esta rota foi cancelada sem paradas em aberto, ou antes de o sistema guardar quais eram. Gere uma rota nova a partir dos pedidos.'
+          : 'As paradas desta rota já foram colocadas em outra rota, entregues ou canceladas.',
+      );
+    }
+
+    const driverId = dto.driver_id ?? original.driver_id ?? undefined;
+    const vehicleId = dto.vehicle_id ?? original.vehicle_id ?? undefined;
+
+    if (driverId && !(await this.driverRepository.exist({ where: { driver_id: driverId, id_company: idCompany } }))) {
+      throw new BadRequestException(`Motorista ${driverId} não encontrado`);
+    }
+    if (vehicleId && !(await this.vehicleRepository.exist({ where: { vehicle_id: vehicleId, id_company: idCompany } }))) {
+      throw new BadRequestException(`Veículo ${vehicleId} não encontrado`);
+    }
+
+    const company = await this.companyRepository.findOne({
+      where: { id_company: idCompany },
+      select: ['id_company', 'timezone'],
+    });
+    const plannedDate = dto.planned_date ?? todayInTimeZone(company?.timezone ?? 'America/Sao_Paulo');
+    // Distância e duração planejadas só valem para o mesmo conjunto de paradas:
+    // se a rota cancelada já tinha entregas, a nova é menor que ela.
+    const baixadasNaOriginal = await this.dataSource.manager.count(RouteStop, {
+      where: { route_id: routeId, id_company: idCompany, status: In(['delivered', 'failed']) },
+    });
+    const mesmasParadas = baixadasNaOriginal === 0 && disponiveis.length === devolvidas;
+    const autor = this.autor();
+
+    const novaRotaId = await runInTransaction(this.dataSource, async (manager) => {
+      const nova = await manager.save(
+        manager.create(Route, {
+          id_company: idCompany,
+          driver_id: driverId,
+          vehicle_id: vehicleId,
+          status: 'planned' as RouteStatus,
+          planned_date: plannedDate as unknown as Date,
+          total_distance_m: mesmasParadas ? original.total_distance_m : undefined,
+          total_duration_min: mesmasParadas ? original.total_duration_min : undefined,
+          simulated: original.simulated,
+          region: original.region,
+          duplicated_from_route_id: original.route_id,
+          created_by: autor,
+        }),
+      );
+
+      // Cada pedido só é tomado se ainda estiver livre na fila. Entre a
+      // consulta acima e este ponto outra rota (ou outra duplicação) pode ter
+      // levado algum; nesse caso nada é gravado e a resposta é 409.
+      let tomados = 0;
+      for (const [indice, stop] of disponiveis.entries()) {
+        const result = await manager
+          .createQueryBuilder()
+          .update(Order)
+          .set({
+            route_id: nova.route_id,
+            stop_sequence: indice + 1,
+            status: 'planned',
+            driver_id: driverId,
+            vehicle_id: vehicleId,
+            delivery_date: plannedDate as unknown as Date,
+            updated_by: autor,
+          })
+          .where('order_id = :orderId', { orderId: stop.order_id })
+          .andWhere('id_company = :idCompany', { idCompany })
+          .andWhere('route_id IS NULL')
+          .andWhere('status = :pending', { pending: 'pending' })
+          .execute();
+        tomados += result.affected ?? 0;
+      }
+      if (tomados < disponiveis.length) {
+        throw new ConflictException(
+          'Algumas paradas desta rota foram colocadas em outra rota enquanto a duplicação acontecia. Tente de novo.',
+        );
+      }
+      await addRouteStops(
+        manager,
+        idCompany,
+        nova.route_id,
+        disponiveis.map((stop, indice) => ({ orderId: stop.order_id, sequence: indice + 1 })),
+      );
+
+      return nova.route_id;
+    });
+
+    this.logger.log(
+      `Rota ${routeId} duplicada na rota ${novaRotaId} com ${disponiveis.length} parada(s)`,
+    );
+    return this.findOne(novaRotaId);
+  }
+
+  /**
+   * Paradas devolvidas por rotas canceladas que ainda estão livres na fila
+   * (pedido pendente e sem rota), na ordem que tinham na rota original.
+   */
+  private async availableReturnedStops(routeIds: number[]): Promise<RouteReturnedStop[]> {
+    if (routeIds.length === 0) return [];
+    const idCompany = this.tenantContext.getIdCompany();
+
+    const devolvidas = await this.returnedStopRepository.find({
+      where: { route_id: In(routeIds), id_company: idCompany },
+      order: { route_id: 'ASC', stop_sequence: 'ASC' },
+    });
+    if (devolvidas.length === 0) return [];
+
+    const livres = await this.orderRepository.find({
+      where: {
+        order_id: In(devolvidas.map((stop) => stop.order_id)),
+        id_company: idCompany,
+        status: 'pending',
+        route_id: IsNull(),
+      },
+      select: ['order_id'],
+    });
+    const idsLivres = new Set(livres.map((order) => order.order_id));
+
+    return devolvidas.filter((stop) => idsLivres.has(stop.order_id));
   }
 
   /**

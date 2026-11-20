@@ -1,0 +1,22 @@
+# Banco para desenvolvimento local.
+#   docker compose -f docker-compose.dev.yml up -d
+#   npm run migration:run && npm run start:dev
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: athonis
+      POSTGRES_PASSWORD: athonis
+      POSTGRES_DB: athonis
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U athonis"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:

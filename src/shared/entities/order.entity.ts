@@ -1,3 +1,4 @@
+import { DATETIME_TYPE, decimalTransformer } from '../../database/column-types';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -58,7 +59,7 @@ export class Order {
   delivery_window?: string;
 
   /** Valor da mercadoria/frete, usado nos indicadores do painel. */
-  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 12, scale: 2, transformer: decimalTransformer, nullable: true })
   value?: number;
 
   /**
@@ -92,7 +93,7 @@ export class Order {
   delivery_geocoded_address?: string;
 
   /** Momento em que a entrega foi efetivamente concluída. */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: DATETIME_TYPE, nullable: true })
   delivered_at?: Date;
 
   @Column({ type: 'int', nullable: true })
@@ -136,13 +137,13 @@ export class Order {
   @Column({ type: 'varchar', length: 100, nullable: true })
   delivery_complement?: string;
 
-  @Column({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   created_by?: string;
 
-  @Column({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  @Column({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updated_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })

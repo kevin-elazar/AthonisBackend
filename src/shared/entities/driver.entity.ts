@@ -1,3 +1,4 @@
+import { DATETIME_TYPE } from '../../database/column-types';
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
 import { CnhCategory, DriverStatus } from '../domain/enums';
 
@@ -47,13 +48,13 @@ export class Driver {
   @Column({ type: 'varchar', length: 20, default: 'available' })
   status: DriverStatus;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP' })
   created_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   created_by?: string;
 
-  @CreateDateColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ type: DATETIME_TYPE, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updated_at!: Date;
 
   @Column({ type: 'varchar', length: 50, nullable: true })

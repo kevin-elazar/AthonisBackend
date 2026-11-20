@@ -1,6 +1,7 @@
+import { containsInsensitive } from '../../../database/column-types';
 import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindOptionsWhere } from 'typeorm';
+import { Repository, FindOptionsWhere } from 'typeorm';
 import { Vehicle } from '../../../shared/entities/vehicle.entity';
 import { CreateVehicleDto } from '../dto/create-vehicle.dto';
 import { UpdateVehicleDto } from '../dto/update-vehicle.dto';
@@ -80,11 +81,11 @@ export class VehiclesService {
     }
 
     if (name) {
-      where.name = Like(`%${name.trim()}%`);
+      where.name = containsInsensitive(name.trim());
     }
 
     if (brand) {
-      where.brand = Like(`%${brand.trim()}%`);
+      where.brand = containsInsensitive(brand.trim());
     }
 
     return where;

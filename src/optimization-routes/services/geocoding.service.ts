@@ -115,8 +115,18 @@ export class GeocodingService {
 
   // Método para coordenadas simuladas (fallback quando API não está disponível)
   getSimulatedCoordinates(city: string, address: string): GeocodingResult {
-    // Coordenadas base para São Paulo
+    // Centro de cada cidade. Sem a chave do Google, a rota é estimada em
+    // torno daqui; cidade fora da lista cai em São Paulo.
     const baseCoordinates = {
+      'Jaraguá do Sul': { lat: -26.4851, lng: -49.0713 },
+      'Joinville': { lat: -26.3045, lng: -48.8487 },
+      'Blumenau': { lat: -26.9194, lng: -49.0661 },
+      'Florianópolis': { lat: -27.5954, lng: -48.548 },
+      'Guaramirim': { lat: -26.4733, lng: -49.0027 },
+      'Schroeder': { lat: -26.4117, lng: -49.0731 },
+      'Corupá': { lat: -26.4253, lng: -49.2431 },
+      'Pomerode': { lat: -26.7406, lng: -49.1769 },
+      'Curitiba': { lat: -25.4284, lng: -49.2733 },
       'São Paulo': { lat: -23.5505, lng: -46.6333 },
       'Rio de Janeiro': { lat: -22.9068, lng: -43.1729 },
       'Belo Horizonte': { lat: -19.9167, lng: -43.9345 },
@@ -124,12 +134,15 @@ export class GeocodingService {
       'Brasília': { lat: -15.7801, lng: -47.9292 }
     };
 
-    const cityCoords = baseCoordinates[city] || baseCoordinates['São Paulo'];
+    const cidade = Object.keys(baseCoordinates).find(
+      (nome) => nome.localeCompare(city.trim(), 'pt-BR', { sensitivity: 'base' }) === 0,
+    );
+    const cityCoords = baseCoordinates[cidade ?? 'São Paulo'];
     
     // Adicionar pequena variação baseada no endereço
     const hash = this.simpleHash(address);
-    const latVariation = (hash % 1000 - 500) / 10000; // ±0.05 graus
-    const lngVariation = ((hash >> 10) % 1000 - 500) / 10000;
+    const latVariation = (hash % 1000 - 500) / 20000; // ±0.025 graus (~2,8 km)
+    const lngVariation = ((hash >> 10) % 1000 - 500) / 20000;
 
     return {
       latitude: cityCoords.lat + latVariation,

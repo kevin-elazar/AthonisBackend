@@ -6,7 +6,6 @@ export class TenantContextService {
   private user: JwtUser | null = null;
 
   setUser(user: JwtUser): void {
-    console.log({ settingUser: user });
     this.user = user;
   }
 

@@ -53,6 +53,8 @@ describe('OrdersService', () => {
             findOne: jest.fn(),
             findAndCount: jest.fn().mockResolvedValue([[mockOrder], 1]),
             remove: jest.fn(),
+            // Tentativas de entrega da lista (route_stop e route_event): nenhuma.
+            manager: { find: jest.fn().mockResolvedValue([]) },
           },
         },
         {

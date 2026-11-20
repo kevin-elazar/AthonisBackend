@@ -7,6 +7,12 @@ export class AuthResponseDto {
   })
   access_token: string;
 
+  @ApiProperty({
+    description:
+      'Token de renovação. Troque por um novo par em POST /auth/refresh antes de o access token expirar.',
+  })
+  refresh_token: string;
+
   @ApiProperty({ 
     description: 'Tipo do token', 
     example: 'Bearer' 
@@ -28,6 +34,7 @@ export class AuthResponseDto {
     name: string;
     role: string;
     id_company: number;
+    driver_id?: number | null;
   };
 }
 

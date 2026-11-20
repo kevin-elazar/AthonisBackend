@@ -1,0 +1,31 @@
+name: Bug
+description: Algo não funciona como deveria
+labels: [bug]
+body:
+  - type: textarea
+    id: oque
+    attributes:
+      label: O que aconteceu
+      description: Descreva o erro e o que você esperava ver.
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Faça login como motorista
+        2. Abra a rota do dia
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: ambiente
+    attributes:
+      label: Ambiente
+      options: [Produção, Staging, Local]
+  - type: textarea
+    id: evidencia
+    attributes:
+      label: Evidências
+      description: Prints, resposta da API, log.
